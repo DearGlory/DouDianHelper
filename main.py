@@ -759,7 +759,7 @@ async def run(
             export_review = bool(config.get("export_processed_orders_review", True))
             if export_review:
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                review_dir = Path(r"E:\DouDianHelper\logs\run_history")
+                review_dir = Path("logs") / "run_history"
                 review_dir.mkdir(parents=True, exist_ok=True)
                 review_output = review_dir / f"processed-orders-review-{timestamp}.xlsx"
                 review_header, review_rows = reader.fetch_rows_by_order_ids(selected_order_ids_for_run)

@@ -114,13 +114,17 @@ copy config.example.json config.json
 }
 ```
 
-当开启时，会固定输出到：
+当前开启时，会输出到项目相对目录：
 
 ```text
-E:\DouDianHelper\logs\run_history
+logs/run_history
 ```
 
-输出路径是固定的，不受配置文件修改影响。
+也就是：
+
+- 默认写到项目根目录下的 `logs/run_history`
+- 不应写死绝对路径
+- 跟随项目目录一起移动
 
 ---
 
@@ -240,7 +244,7 @@ python main.py --config config.json --force-refresh-login
 则每轮运行结束后会生成：
 
 ```text
-E:\DouDianHelper\logs\run_history\processed-orders-review-YYYYMMDD-HHMMSS.xlsx
+logs/run_history/processed-orders-review-YYYYMMDD-HHMMSS.xlsx
 ```
 
 文件中会带上本轮订单的运行状态与原因，便于人工复查。
