@@ -1,0 +1,42 @@
+{
+  "excel_path": "Order.xlsx",
+  "message_template": "您好，感谢您对本店的支持～如果您对本次购物体验满意，辛苦给个好评鼓励一下我们呀，祝您生活愉快！",
+  "log_level": "INFO",
+  "log_file": "logs/doudian-helper.log",
+  "resource_log_interval_seconds": 60,
+  "browser_restart_every_n_orders": 300,
+  "risk_control_pause_seconds": 300,
+  "max_retries": 2,
+  "retry_backoff_seconds": 2,
+  "default_wait_ms": 1200,
+  "search_after_input_wait_ms": 500,
+  "post_send_wait_ms": 600,
+  "browser": {
+    "mode": "cdp",
+    "cdp_url": "http://127.0.0.1:9222",
+    "use_real_user_profile": false,
+    "user_data_dir": "edge-profile",
+    "profile_directory": "Default",
+    "storage_state_path": "storage_state.json",
+    "bootstrap_storage_state_path": "storage_state.bootstrap.json",
+    "headless": true,
+    "target_url_keywords": ["im.jinritemai.com", "pc_seller"]
+  },
+  "selectors": {
+    "feige_search_input": "input.auxo-input",
+    "feige_search_dropdown": "div.fuzzySearchPanelOverlay",
+    "feige_input": "__TODO__",
+    "feige_send_button": "__TODO__",
+    "after_sale_flag": "__TODO__"
+  },
+  "order_id_aliases": [
+    "订单号",
+    "订单编号",
+    "主订单号",
+    "父订单号",
+    "订单ID",
+    "order_id",
+    "orderid",
+    "订单"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "excel_path": "Order.xlsx",
+  "message_template": "退款3.00元【不用截图】【不用截图】【不用截图】亲小店活动，5★★★★★可以领取3员现金，收到后满意的话，辛苦您帮忙满星支持下了，您的满意是小店最大的荣誉，有问题 随时和我们说哦 这边及时给您处理好 祝您马年发大财",
+  "log_level": "INFO",
+  "log_file": "logs/doudian-helper.log",
+  "resource_log_interval_seconds": 60,
+  "browser_restart_every_n_orders": 300,
+  "max_retries": 3,
+  "retry_backoff_seconds": 2,
+  "default_wait_ms": 3000,
+  "search_after_input_wait_ms": 1000,
+  "post_send_wait_ms": 1000,
+  "feige_load_wait_ms": 7000,
+  "browser": {
+    "mode": "cdp",
+    "cdp_url": "http://127.0.0.1:9222",
+    "user_data_dir": "edge-profile",
+    "profile_directory": "Default",
+    "storage_state_path": "storage_state.json",
+    "bootstrap_storage_state_path": "storage_state.bootstrap.json",
+    "headless": true,
+    "target_url_keywords": [
+      "im.jinritemai.com",
+      "pc_seller"
+    ]
+  },
+  "selectors": {
+    "feige_search_input": "input.auxo-input",
+    "feige_search_dropdown": "div.fuzzySearchPanelOverlay",
+    "feige_input": "textarea.Q0ZcClfcpfuWyhFPU3gR",
+    "feige_send_button": "div.xyr2h3Spq6gTVjER_ECV",
+    "after_sale_flag": "div._871b237cd9b14d4b746be28ae9b57e65-less",
+    "invite_review_button": "button.ecom-btn:has-text('邀评')"
+  },
+  "order_id_aliases": [
+    "订单号",
+    "订单编号",
+    "主订单号",
+    "父订单号",
+    "订单ID",
+    "order_id",
+    "orderid",
+    "订单"
+  ]
+}

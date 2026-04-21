@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# Runtime state / local config
+config.json
+config.json.pause_state.json
+config.local-notes.txt
+storage_state.json
+storage_state.bootstrap.json
+
+# Local browser/profile data
+edge-profile/
+
+# Logs and temp output
+logs/
+TempFile/
+artifacts/
+
+# Local input/output files
+Order.xlsx
+processed-orders-review-*.xlsx
+
+# IDE / local assistant
+.claude/
