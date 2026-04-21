@@ -6,7 +6,7 @@ DouDianHelper 是一个面向 Windows 桌面环境的抖店 / 飞鸽自动化工
 
 ---
 
-## 一、项目能力
+## 功能概览
 
 当前版本支持以下能力：
 
@@ -23,7 +23,7 @@ DouDianHelper 是一个面向 Windows 桌面环境的抖店 / 飞鸽自动化工
 
 ---
 
-## 二、处理规则
+## 处理规则
 
 只有满足以下条件的订单，才会发送消息：
 
@@ -36,7 +36,7 @@ DouDianHelper 是一个面向 Windows 桌面环境的抖店 / 飞鸽自动化工
 
 ---
 
-## 三、项目结构
+## 项目结构
 
 ```text
 DouDianHelper/
@@ -51,12 +51,12 @@ DouDianHelper/
 ├─ requirements.txt            # 依赖列表
 ├─ README.md                   # 项目说明
 ├─ logs/run_history/           # 运行复核文件输出目录
-└─ TempFile/                   # 临时文件目录（不提交 Git）
+└─ TempFile/                   # 临时文件目录
 ```
 
 ---
 
-## 四、运行环境
+## 运行环境
 
 - Windows
 - Python 3.11 及以上
@@ -66,9 +66,7 @@ DouDianHelper/
 
 ---
 
-## 五、安装方式
-
-先安装依赖：
+## 安装
 
 ```bash
 pip install -r requirements.txt
@@ -77,7 +75,7 @@ python -m playwright install chromium
 
 ---
 
-## 六、配置说明
+## 配置
 
 先从模板复制本地配置：
 
@@ -104,31 +102,17 @@ copy config.example.json config.json
 | `browser.profile_directory` | Edge Profile 目录 |
 | `selectors.*` | 页面元素选择器 |
 
-### 关于复核文件
+### 复核文件输出
 
-复核文件是否生成由下面这个配置控制：
-
-```json
-{
-  "export_processed_orders_review": true
-}
-```
-
-当前开启时，会输出到项目相对目录：
+当 `export_processed_orders_review = true` 时，程序会在项目相对目录下输出复核文件：
 
 ```text
-logs/run_history
+logs/run_history/processed-orders-review-YYYYMMDD-HHMMSS.xlsx
 ```
-
-也就是：
-
-- 默认写到项目根目录下的 `logs/run_history`
-- 不应写死绝对路径
-- 跟随项目目录一起移动
 
 ---
 
-## 七、启动方式
+## 启动方式
 
 ### 正常运行
 
@@ -148,7 +132,7 @@ python main.py --config config.json --limit 20
 python main.py --config config.json --parallel-workers 10
 ```
 
-### 仅模拟运行（不真实发送）
+### 模拟运行
 
 ```bash
 python main.py --config config.json --dry-run
@@ -162,7 +146,7 @@ python main.py --config config.json --force-refresh-login
 
 ---
 
-## 八、主流程说明
+## 主流程说明
 
 程序运行时的大致流程如下：
 
@@ -181,11 +165,11 @@ python main.py --config config.json --force-refresh-login
 
 - 不再每单重新请求订单管理页
 - 不再切换“已完成标签”
-- 会优先复用已有订单页，减少多余请求与风控压力
+- 优先复用已有订单页，减少多余请求与风控压力
 
 ---
 
-## 九、风控暂停与自动恢复
+## 风控暂停与自动恢复
 
 当程序检测到风控时，不会直接整批退出，而是执行以下流程：
 
@@ -206,13 +190,9 @@ python main.py --config config.json --force-refresh-login
 - 已执行数量
 - 预计恢复时间
 
-也就是说，当前实现不是“触发风控后整轮作废”，而是：
-
-**保存现场 → 暂停 → 释放资源 → 定时恢复 → 继续剩余任务。**
-
 ---
 
-## 十、Excel 队列机制
+## Excel 队列机制
 
 `Order.xlsx` 本身就是待处理队列。
 
@@ -229,19 +209,15 @@ python main.py --config config.json --force-refresh-login
 
 ---
 
-## 十一、日志与输出
+## 日志与输出
 
-### 1）运行日志
+### 运行日志
 
-运行日志会输出到本地 `logs/` 目录（以及终端）。
+运行日志会输出到本地 `logs/` 目录以及终端。
 
-### 2）复核文件
+### 复核文件
 
-如果启用了：
-
-- `export_processed_orders_review = true`
-
-则每轮运行结束后会生成：
+如果启用了复核导出，则每轮运行结束后会生成：
 
 ```text
 logs/run_history/processed-orders-review-YYYYMMDD-HHMMSS.xlsx
@@ -251,28 +227,7 @@ logs/run_history/processed-orders-review-YYYYMMDD-HHMMSS.xlsx
 
 ---
 
-## 十二、Git 提交建议
-
-这个项目包含很多本地运行态文件，不适合直接提交到 GitHub。
-
-当前建议忽略的内容包括：
-
-- `config.json`
-- `venv/`
-- `edge-profile/`
-- `logs/`
-- `TempFile/`
-- `storage_state.json`
-- `storage_state.bootstrap.json`
-- `Order.xlsx`
-- `processed-orders-review-*.xlsx`
-- 其他本地产生的调试 / 临时文件
-
-项目已经提供 `.gitignore` 用于屏蔽这些内容。
-
----
-
-## 十三、已知限制
+## 已知限制
 
 - 当前方案主要面向 Windows 本地桌面环境
 - 强依赖真实浏览器状态与站点页面结构
@@ -281,7 +236,7 @@ logs/run_history/processed-orders-review-YYYYMMDD-HHMMSS.xlsx
 
 ---
 
-## 十四、使用提醒
+## 使用提醒
 
 请在符合平台规则、业务规则与自身风险可控的前提下使用本项目。
 
@@ -290,27 +245,3 @@ logs/run_history/processed-orders-review-YYYYMMDD-HHMMSS.xlsx
 - 本地自动化工具
 - 内部业务辅助脚本
 - 自用批处理项目
-
-如果你计划公开发布到 GitHub，建议补充：
-
-- License
-- 更新日志
-- 示例配置说明
-- 常见问题（FAQ）
-
----
-
-## 十五、后续可继续完善的方向
-
-如果要继续往正式开源项目方向整理，建议后续补充：
-
-- `LICENSE`
-- `CHANGELOG.md`
-- 更完整的配置项文档
-- 常见报错与排查说明
-- 选择器校准指南
-- 风控恢复流程图
-
----
-
-如果你是准备把这个仓库发到 GitHub，这个 README 已经适合作为当前版本的正式项目首页说明。
