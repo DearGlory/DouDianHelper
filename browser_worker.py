@@ -330,6 +330,21 @@ class BrowserWorker:
         except Exception:
             return None
 
+    async def _detect_env_risk_dialog(self, page: Page) -> bool:
+        """检测飞鸽「当前环境存在风险，请稍后重试」弹窗。"""
+        try:
+            modals = page.locator("div[role='dialog'].auxo-modal-wrap")
+            count = await modals.count()
+            for i in range(count):
+                modal = modals.nth(i)
+                if not await modal.is_visible():
+                    continue
+                text = await modal.inner_text()
+                if "当前环境存在风险" in text:
+                    return True
+            return False
+        except Exception:
+            return False
 
     async def _raise_if_risk_control_detected(self, page: Page) -> None:
         detail = await self._detect_risk_control(page)
@@ -546,9 +561,10 @@ class BrowserWorker:
 
         order_text = snapshot.get("row_text", "")
         cells_text = snapshot.get("cells_text", "")
+        remark = snapshot.get("remark", "")
         order_status = snapshot.get("order_status", "")
         after_sale_status = snapshot.get("after_sale_status", "")
-        combined_text = "\n".join(part for part in (order_text, cells_text) if part)
+        combined_text = "\n".join(part for part in (order_text, cells_text, remark) if part)
 
         for keyword in self.DO_NOT_CONTACT_KEYWORDS:
             if keyword in combined_text:
@@ -587,6 +603,75 @@ class BrowserWorker:
         await page.wait_for_timeout(self.config.get("default_wait_ms", 3000))
         await self._ensure_logged_in(page)
         self.logger.info("订单 %s：已直达飞鸽会话", order_id)
+        return page
+
+    async def _open_conversation_via_feige_search(self, order_id: str) -> Page:
+        """降级：通过飞鸽工作台搜索框打开买家会话。"""
+        if self.context is None:
+            raise RuntimeError("浏览器上下文未初始化")
+        page = await self.context.new_page()
+        await page.set_viewport_size({"width": 1920, "height": 1080})
+        await page.goto(FEIGE_URL, wait_until="domcontentloaded", timeout=30_000)
+        await page.wait_for_timeout(self.config.get("default_wait_ms", 3000))
+        await self._ensure_logged_in(page)
+        await self._raise_if_risk_control_detected(page)
+
+        sel_search = self._sel("feige_search_input")
+        search_input = page.locator(sel_search).first
+        await search_input.wait_for(state="visible", timeout=10_000)
+        await search_input.click()
+        await self._raise_if_risk_control_detected(page)
+
+        await search_input.press("Control+A")
+        await search_input.press("Backspace")
+        await page.wait_for_timeout(random.randint(200, 400))
+
+        type_delay = int(self.config.get("search_type_delay_ms", 120))
+        type_jitter = int(self.config.get("search_type_jitter_ms", 80))
+        for ch in order_id:
+            await search_input.type(ch, delay=max(20, type_delay + random.randint(-type_jitter, type_jitter)))
+
+        await self._raise_if_risk_control_detected(page)
+        input_wait = int(self.config.get("search_after_input_wait_ms", 1000))
+        await page.wait_for_timeout(input_wait + random.randint(100, 500))
+
+        sel_dropdown = self._sel("feige_search_dropdown")
+        candidates = [
+            page.locator(sel_dropdown).get_by_text("来自订单", exact=False).first,
+            page.locator(sel_dropdown).get_by_text(order_id, exact=False).first,
+            page.get_by_text("来自订单", exact=False).first,
+        ]
+        contact = None
+        for candidate in candidates:
+            try:
+                await candidate.wait_for(state="visible", timeout=2_000)
+                contact = candidate
+                break
+            except Exception:
+                continue
+
+        if contact is None:
+            try:
+                await search_input.press("Enter")
+                await page.wait_for_timeout(max(800, input_wait // 2) + random.randint(120, 360))
+            except Exception:
+                pass
+            for candidate in candidates:
+                try:
+                    await candidate.wait_for(state="visible", timeout=1_500)
+                    contact = candidate
+                    break
+                except Exception:
+                    continue
+
+        if contact is None:
+            raise RuntimeError(f"飞鸽搜索未找到订单 {order_id} 的联系人")
+
+        await self._raise_if_risk_control_detected(page)
+        await contact.click()
+        await page.wait_for_timeout(self.config.get("feige_load_wait_ms", 5000))
+        await self._raise_if_risk_control_detected(page)
+        self.logger.info("订单 %s：飞鸽搜索降级成功，已打开会话", order_id)
         return page
 
     async def _check_eligibility(self, page: Page, order_id: str) -> EligibilityResult:
@@ -715,6 +800,12 @@ class BrowserWorker:
                 jump_url = await self._extract_contact_buyer_url_from_doudian(order_id, pre_snapshot)
                 conversation_page = await self._goto_feige_conversation_via_url(order_id, jump_url)
                 await self._ensure_page_ready(conversation_page)
+
+                if await self._detect_env_risk_dialog(conversation_page):
+                    self.logger.warning("订单 %s：直达链接触发环境风险弹窗，降级到飞鸽搜索", order_id)
+                    await conversation_page.close()
+                    conversation_page = await self._open_conversation_via_feige_search(order_id)
+                    await self._ensure_page_ready(conversation_page)
 
                 eligibility = await self._check_eligibility(conversation_page, order_id)
                 if not eligibility.eligible:

@@ -186,3 +186,14 @@ python main.py --config config.json --force-refresh-login
 ## 使用提醒
 
 请在符合平台规则、业务规则与自身风险可控的前提下使用本项目。
+
+---
+
+## 捐赠
+
+如果这个项目帮到了你，欢迎请作者喝杯咖啡 ☕
+
+<p align="center">
+  <img src="docs/donate-1.jpg" width="300" />
+  <img src="docs/donate-2.jpg" width="300" />
+</p>
