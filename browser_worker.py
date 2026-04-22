@@ -330,17 +330,35 @@ class BrowserWorker:
         except Exception:
             return None
 
+    ENV_RISK_DIALOG_TEXT = "当前环境存在风险"
+    ENV_RISK_DIALOG_SELECTORS = [
+        "div[role='dialog']",
+        ".auxo-modal-wrap",
+        ".auxo-modal",
+        "[class*='modal']",
+        "[class*='dialog']",
+    ]
+
     async def _detect_env_risk_dialog(self, page: Page) -> bool:
-        """检测飞鸽「当前环境存在风险，请稍后重试」弹窗。"""
+        """检测飞鸽「当前环境存在风险，请稍后重试」弹窗。
+
+        双重检测：先按文字精确匹配，再按弹窗容器 + 文字匹配。
+        """
         try:
-            modals = page.locator("div[role='dialog'].auxo-modal-wrap")
+            # 策略1：直接搜页面文字（最可靠）
+            text_loc = page.get_by_text(self.ENV_RISK_DIALOG_TEXT, exact=False)
+            if await text_loc.count() > 0 and await text_loc.first.is_visible():
+                return True
+            # 策略2：遍历常见弹窗容器
+            combined = ", ".join(self.ENV_RISK_DIALOG_SELECTORS)
+            modals = page.locator(combined)
             count = await modals.count()
             for i in range(count):
                 modal = modals.nth(i)
                 if not await modal.is_visible():
                     continue
                 text = await modal.inner_text()
-                if "当前环境存在风险" in text:
+                if self.ENV_RISK_DIALOG_TEXT in text:
                     return True
             return False
         except Exception:
@@ -683,6 +701,8 @@ class BrowserWorker:
                 "div.ecom-collapse", state="visible", timeout=20_000
             )
         except Exception as exc:
+            if await self._detect_env_risk_dialog(page):
+                raise RuntimeError("ENV_RISK_DIALOG_DETECTED") from exc
             raise RuntimeError(f"订单卡片未加载: {exc}") from exc
 
         try:
@@ -824,6 +844,31 @@ class BrowserWorker:
                     raise RuntimeError("BROWSER_SESSION_BROKEN") from e
                 if "CHAT_INPUT_NOT_FOUND" in str(e):
                     return ("skipped", "聊天输入框不可用，跳过")
+                if "ENV_RISK_DIALOG_DETECTED" in str(e):
+                    self.logger.warning("订单 %s：检测到环境风险弹窗，降级到飞鸽搜索", order_id)
+                    if conversation_page is not None:
+                        try:
+                            await conversation_page.close()
+                        except Exception:
+                            pass
+                        conversation_page = None
+                    try:
+                        conversation_page = await self._open_conversation_via_feige_search(order_id)
+                        await self._ensure_page_ready(conversation_page)
+                        eligibility = await self._check_eligibility(conversation_page, order_id)
+                        if not eligibility.eligible:
+                            return ("skipped", eligibility.reason)
+                        await self._send_message(conversation_page, message)
+                        await self._release_conversation(conversation_page)
+                        return ("sent", "message_sent")
+                    except Exception as fallback_err:
+                        self.logger.warning("订单 %s：飞鸽搜索降级也失败 | %s", order_id, fallback_err)
+                        last_err = fallback_err
+                        if RISK_CONTROL_ERROR_TOKEN in str(fallback_err):
+                            raise
+                        if attempt >= max_retries:
+                            raise
+                        continue
                 if attempt < max_retries:
                     wait = self.config.get("retry_backoff_seconds", 2) * (attempt + 1)
                     self.logger.warning("直达 | %s | retry %s/%s | %s", order_id, attempt + 1, max_retries, e)
