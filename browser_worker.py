@@ -15,10 +15,9 @@ FEIGE_URL = "https://im.jinritemai.com/pc_seller_v2/main/workspace"
 DOUDIAN_ORDER_LIST_URL = "https://fxg.jinritemai.com/ffa/morder/order/list"
 BOOTSTRAP_STORAGE_STATE = "storage_state.bootstrap.json"
 CDP_STARTUP_LOCK = asyncio.Lock()
-FEIGE_SEARCH_LOCK = asyncio.Lock()
 CDP_NAVIGATION_RETRY_ERRORS = ("ERR_ABORTED", "ERR_CONNECTION_CLOSED", "ERR_NETWORK_CHANGED", "ERR_CONNECTION_RESET")
 RISK_CONTROL_ERROR_TOKEN = "RISK_CONTROL_DETECTED"
-SOFT_RISK_CONTROL_ERROR_TOKEN = "SOFT_RISK_CONTROL_DETECTED"
+LOGIN_STATE_MISSING_ERROR_TOKEN = "LOGIN_STATE_MISSING"
 
 
 @dataclass
@@ -47,17 +46,6 @@ class BrowserWorker:
         "无会话权限",
         "账号权限",
     ]
-    SOFT_RISK_TEXTS = [
-        "网络问题",
-        "网络异常",
-        "网络错误",
-        "请刷新",
-        "刷新重试",
-        "请稍后重试",
-        "加载失败",
-        "请求失败",
-        "服务异常",
-    ]
     DO_NOT_CONTACT_KEYWORDS = [
         "不要联系",
         "勿联系",
@@ -81,7 +69,6 @@ class BrowserWorker:
         self.context: BrowserContext | None = None
         self.page: Page | None = None
         self._is_cdp = False
-        self._last_search_ts = 0.0
         self.order_page: Page | None = None
 
     async def _load_storage_state(self) -> dict[str, Any] | None:
@@ -147,15 +134,18 @@ class BrowserWorker:
         if self._is_cdp:
             self.page = await self._prepare_cdp_page()
             self.order_page = await self._prepare_order_page()
+            await self.page.close()
+            self.logger.info("初始飞鸽页已完成登录态校验，关闭以释放内存")
         else:
             self.page = await self._find_feige_page()
             await self._ensure_logged_in(self.page)
             self.order_page = await self._prepare_order_page()
-        await self.page.set_viewport_size({"width": 1920, "height": 1080})
+            await self.page.close()
+            self.logger.info("初始飞鸽页已完成登录态校验，关闭以释放内存")
+        self.page = None
         if self.order_page is not None:
             await self.order_page.set_viewport_size({"width": 1920, "height": 1080})
-        feige_url = self.page.url
-        self.logger.info("工作页已就绪: %s", feige_url)
+        self.logger.info("工作页已就绪")
 
     async def _save_storage_state(self) -> None:
         browser_cfg = self.config.get("browser", {})
@@ -249,21 +239,10 @@ class BrowserWorker:
             user_data_dir = browser_cfg.get("user_data_dir", "edge-profile")
             headless = browser_cfg.get("headless", False)
             raise RuntimeError(
-                "飞鸽页面当前没有可用登录态。"
+                f"{LOGIN_STATE_MISSING_ERROR_TOKEN}: 飞鸽页面当前没有可用登录态。"
                 f"请先使用同一个 user_data_dir 登录一次: {user_data_dir}。"
-                f"当前 headless={headless}，请先改为 false，运行 start_edge.bat 手动登录飞鸽，"
-                "确认进入工作台后关闭浏览器，再切回 headless=true 重试。"
+                f"当前 headless={headless}，程序将尝试回退到有头登录预热；如仍失败，再手动运行 start_edge.bat 登录飞鸽。"
             )
-
-    async def _reset_feige_page(self, page: Page) -> None:
-        self.logger.warning("重置 | feige-page | input-missing | %s", page.url)
-        try:
-            await page.reload(wait_until="domcontentloaded", timeout=30_000)
-        except Exception:
-            await self._goto_feige_workspace(page, timeout_ms=30_000)
-        await self._ensure_logged_in(page)
-        await page.wait_for_timeout(self.config.get("default_wait_ms", 3000))
-        await self._raise_if_risk_control_detected(page)
 
     async def _dismiss_blocking_modal(self, page: Page) -> bool:
         modals = page.locator("div[role='dialog'].auxo-modal-wrap")
@@ -331,53 +310,26 @@ class BrowserWorker:
             return False
 
     async def _detect_risk_control(self, page: Page) -> str | None:
-        risk_selectors = [
-            "#captcha_container",
-            "iframe[src*='captcha']",
-            "iframe[id*='captcha']",
-            "div[class*='captcha']",
-            "div[id*='captcha']",
-        ]
-        risk_texts = [
-            "验证码",
-            "滑块验证",
-            "请完成验证",
-            "安全验证",
-            "人机验证",
-        ]
-
-        for selector in risk_selectors:
-            try:
-                locator = page.locator(selector).first
-                if await locator.count() == 0:
-                    continue
-                if await locator.is_visible():
-                    text = ""
-                    try:
-                        text = (await locator.inner_text()).strip()
-                    except Exception:
-                        text = ""
-                    normalized_text = " ".join(text.split())
-                    if normalized_text and any(risk_text in normalized_text for risk_text in risk_texts):
-                        return normalized_text
-                    if selector == "#captcha_container":
-                        return selector
-                    return text or selector
-            except Exception:
-                continue
-
-        return None
-
-    async def _detect_soft_risk_control(self, page: Page) -> str | None:
+        combined_selector = "#captcha_container, iframe[src*='captcha'], iframe[id*='captcha'], div[class*='captcha'], div[id*='captcha']"
+        risk_texts = ["验证码", "滑块验证", "请完成验证", "安全验证", "人机验证"]
         try:
-            body_text = (await page.locator("body").inner_text()).strip()
+            locator = page.locator(combined_selector).first
+            if await locator.count() == 0:
+                return None
+            if not await locator.is_visible():
+                return None
+            text = ""
+            try:
+                text = (await locator.inner_text()).strip()
+            except Exception:
+                pass
+            normalized = " ".join(text.split()) if text else ""
+            if normalized and any(rt in normalized for rt in risk_texts):
+                return normalized
+            return text or "captcha_element_detected"
         except Exception:
             return None
-        normalized = " ".join(body_text.split())
-        for text in self.SOFT_RISK_TEXTS:
-            if text in normalized:
-                return text
-        return None
+
 
     async def _raise_if_risk_control_detected(self, page: Page) -> None:
         detail = await self._detect_risk_control(page)
@@ -385,175 +337,15 @@ class BrowserWorker:
             raise RuntimeError(
                 f"{RISK_CONTROL_ERROR_TOKEN}: 检测到飞鸽风控/验证码拦截，请先在浏览器中完成人机验证或稍后重试。详情: {detail}"
             )
-        soft_detail = await self._detect_soft_risk_control(page)
-        if soft_detail is not None:
-            raise RuntimeError(
-                f"{SOFT_RISK_CONTROL_ERROR_TOKEN}: 检测到飞鸽搜索/页面出现软风控或限流提示，请暂停后重试。详情: {soft_detail}"
-            )
 
     async def _ensure_page_ready(self, page: Page) -> None:
-        await self._raise_if_risk_control_detected(page)
         for _ in range(3):
             dismissed = await self._dismiss_blocking_modal(page)
             if not dismissed:
                 await self._raise_if_risk_control_detected(page)
                 return
             await page.wait_for_timeout(300)
-            await self._raise_if_risk_control_detected(page)
-
-    async def _focus_search_input(self, page: Page):
-        search_input = page.locator(self._sel("feige_search_input")).first
-        try:
-            await self._ensure_page_ready(page)
-            await search_input.wait_for(state="visible", timeout=10_000)
-            await search_input.click()
-            await self._raise_if_risk_control_detected(page)
-            return search_input
-        except TimeoutError as exc:
-            if "intercepts pointer events" in str(exc):
-                await self._raise_if_risk_control_detected(page)
-            if "intercepts pointer events" not in str(exc):
-                raise
-            await self._ensure_page_ready(page)
-            await search_input.wait_for(state="visible", timeout=10_000)
-            await search_input.click()
-            await self._raise_if_risk_control_detected(page)
-            return search_input
-        except Error as e:
-            if "Target page, context or browser has been closed" in str(e):
-                raise RuntimeError("BROWSER_SESSION_BROKEN") from e
-            raise
-
-    async def _locate_search_contact(self, page: Page, order_id: str):
-        sel_dropdown = self._sel("feige_search_dropdown")
-        candidates = [
-            page.locator(sel_dropdown).get_by_text("来自订单", exact=False).first,
-            page.locator(sel_dropdown).get_by_text(order_id, exact=False).first,
-            page.get_by_text("来自订单", exact=False).first,
-            page.get_by_text(order_id, exact=False).first,
-            page.locator("[class*='search']").get_by_text("来自订单", exact=False).first,
-        ]
-        for candidate in candidates:
-            try:
-                await candidate.wait_for(state="visible", timeout=1_500)
-                return candidate
-            except Exception:
-                continue
-        return None
-
-    async def _clear_search_input(self, search_input) -> None:
-        try:
-            await search_input.click()
-        except Exception:
-            pass
-        try:
-            await search_input.press("Control+A")
-            await search_input.press("Backspace")
-            return
-        except Exception:
-            pass
-        try:
-            await search_input.fill("")
-            return
-        except Exception:
-            pass
-        try:
-            await search_input.press("Control+A")
-            await search_input.press("Delete")
-        except Exception:
-            pass
-
-    async def _throttle_search(self) -> None:
-        min_interval_ms = int(self.config.get("search_min_interval_ms", 2500))
-        jitter_ms = int(self.config.get("search_interval_jitter_ms", 700))
-        now = asyncio.get_running_loop().time()
-        target_interval = (min_interval_ms + random.randint(0, max(0, jitter_ms))) / 1000.0
-        elapsed = now - self._last_search_ts
-        if self._last_search_ts > 0 and elapsed < target_interval:
-            await asyncio.sleep(target_interval - elapsed)
-        self._last_search_ts = asyncio.get_running_loop().time()
-
-    async def _human_type_order_id(self, search_input, order_id: str) -> None:
-        type_delay_ms = int(self.config.get("search_type_delay_ms", 120))
-        type_jitter_ms = int(self.config.get("search_type_jitter_ms", 80))
-        try:
-            await search_input.click()
-        except Exception:
-            pass
-        for ch in order_id:
-            await search_input.type(ch, delay=max(20, type_delay_ms + random.randint(-type_jitter_ms, type_jitter_ms)))
-
-    async def _search_once_in_feige(self, page: Page, order_id: str) -> bool:
-        await self._throttle_search()
-        search_input = await self._focus_search_input(page)
-        input_wait_ms = int(self.config.get("search_after_input_wait_ms", 1000))
-        await self._clear_search_input(search_input)
-        await page.wait_for_timeout(random.randint(180, 420))
-        await self._human_type_order_id(search_input, order_id)
         await self._raise_if_risk_control_detected(page)
-        await page.wait_for_timeout(input_wait_ms + random.randint(100, 500))
-        contact = await self._locate_search_contact(page, order_id)
-        if contact is not None:
-            await self._raise_if_risk_control_detected(page)
-            await contact.click()
-            await self._raise_if_risk_control_detected(page)
-            await page.wait_for_timeout(self.config.get("feige_load_wait_ms", 5000))
-            await self._raise_if_risk_control_detected(page)
-            return True
-        try:
-            await search_input.press("Enter")
-            await page.wait_for_timeout(max(800, input_wait_ms // 2) + random.randint(120, 360))
-            await self._raise_if_risk_control_detected(page)
-        except Exception:
-            pass
-        contact = await self._locate_search_contact(page, order_id)
-        if contact is not None:
-            await self._raise_if_risk_control_detected(page)
-            await contact.click()
-            await self._raise_if_risk_control_detected(page)
-            await page.wait_for_timeout(self.config.get("feige_load_wait_ms", 5000))
-            await self._raise_if_risk_control_detected(page)
-            return True
-        return False
-
-    async def _search_in_feige(self, page: Page, order_id: str) -> bool:
-        """Search order ID in Feige search bar, click contact result.
-
-        Returns True after the matching contact conversation is opened.
-        """
-        retry_backoff_seconds = self.config.get("retry_backoff_seconds", 2)
-        search_attempt = 0
-
-        async with FEIGE_SEARCH_LOCK:
-            self.logger.info("订单 %s 获取飞鸽搜索锁，开始执行搜索", order_id)
-            while True:
-                search_attempt += 1
-                try:
-                    found = await self._search_once_in_feige(page, order_id)
-                    if found:
-                        return True
-                    raise TimeoutError("未命中飞鸽搜索结果")
-                except Exception as search_error:
-                    if RISK_CONTROL_ERROR_TOKEN in str(search_error) or SOFT_RISK_CONTROL_ERROR_TOKEN in str(search_error):
-                        raise
-                    if "BROWSER_SESSION_BROKEN" in str(search_error):
-                        raise
-                    if "Target page, context or browser has been closed" in str(search_error):
-                        raise RuntimeError("BROWSER_SESSION_BROKEN") from search_error
-                    self.logger.warning(
-                        "搜索 | %s | retry %s | %s",
-                        order_id,
-                        search_attempt,
-                        search_error,
-                    )
-                    try:
-                        active_input = page.locator(self._sel("feige_search_input")).first
-                        await active_input.press("Escape")
-                        await asyncio.sleep(0.2)
-                    except Exception:
-                        pass
-                    await self._reset_feige_page(page)
-                    await asyncio.sleep(retry_backoff_seconds)
 
     async def _resolve_review_icon_button(self, card_root, card_header):
         candidate_locators = [
@@ -724,8 +516,6 @@ class BrowserWorker:
             "remark": str(snapshot.get("remark") or "").strip(),
         }
 
-    async def _get_doudian_order_row_snapshot(self, page: Page, order_id: str) -> dict[str, str]:
-        return await self._get_doudian_order_snapshot(page, order_id)
 
     async def _precheck_order_from_doudian(self, order_id: str, snapshot: dict[str, str] | None = None) -> EligibilityResult:
         self.logger.info("订单 %s：开始订单管理页预检", order_id)
@@ -784,8 +574,6 @@ class BrowserWorker:
         await page.goto(jump_url, wait_until="domcontentloaded", timeout=30_000)
         await page.wait_for_timeout(self.config.get("default_wait_ms", 3000))
         await self._ensure_logged_in(page)
-        await self._raise_if_risk_control_detected(page)
-        self.page = page
         self.logger.info("订单 %s：已直达飞鸽会话", order_id)
         return page
 
@@ -867,92 +655,40 @@ class BrowserWorker:
         try:
             await page.wait_for_selector(sel_input, state="visible", timeout=10_000)
         except Exception as e:
-            self.logger.warning("发送 | input | reset-page | %s", e)
-            await self._reset_feige_page(page)
-            await self._ensure_page_ready(page)
-            try:
-                await page.wait_for_selector(sel_input, state="visible", timeout=10_000)
-            except Exception:
-                raise RuntimeError("CHAT_INPUT_NOT_FOUND: 聊天输入框重置后仍未出现，跳过该订单")
+            raise RuntimeError("CHAT_INPUT_NOT_FOUND: 聊天输入框未出现，跳过该订单") from e
         await self._ensure_page_ready(page)
         await page.fill(sel_input, text)
-        await self._raise_if_risk_control_detected(page)
         await page.wait_for_timeout(300)
         try:
             await page.click(sel_send)
-            await self._raise_if_risk_control_detected(page)
         except TimeoutError as exc:
-            if "intercepts pointer events" in str(exc):
-                await self._raise_if_risk_control_detected(page)
             if "intercepts pointer events" not in str(exc):
                 raise
             await self._ensure_page_ready(page)
             await page.click(sel_send)
-            await self._raise_if_risk_control_detected(page)
         await page.wait_for_timeout(self.config.get("post_send_wait_ms", 800))
         await self._raise_if_risk_control_detected(page)
 
-    async def _is_conversation_still_open(self, page: Page) -> bool:
-        conversation_locators = [
-            page.locator("div.ecom-collapse").first,
-            page.locator(self._sel("feige_input")).first,
-            page.locator(self._sel("feige_send_button")).first,
-        ]
-        for locator in conversation_locators:
-            try:
-                if await locator.count() == 0:
-                    continue
-                if await locator.is_visible():
-                    return True
-            except Exception:
-                continue
-        return False
-
-    async def _is_search_list_ready(self, page: Page) -> bool:
-        try:
-            search_input = page.locator(self._sel("feige_search_input")).first
-            if await search_input.count() == 0 or not await search_input.is_visible():
-                return False
-        except Exception:
-            return False
-        return not await self._is_conversation_still_open(page)
-
-    async def _exit_opened_conversation(self, page: Page, order_id: str) -> bool:
-        self.logger.info("订单 %s 当前轮处理结束，按 ESC 退出当前会话", order_id)
+    async def _release_conversation(self, page: Page) -> None:
+        """按 ESC 释放飞鸽会话归属，使后续客户消息派发给在线客服而非当前操作者。"""
         for attempt in range(3):
             try:
-                await self._raise_if_risk_control_detected(page)
-                if await self._is_search_list_ready(page):
-                    return True
                 await page.keyboard.press("Escape")
                 await page.wait_for_timeout(500)
                 await self._raise_if_risk_control_detected(page)
-                if await self._is_search_list_ready(page):
-                    return True
-                self.logger.info(
-                    "订单 %s 第 %s 次 ESC 后列表态尚未稳定，继续校验/重试",
-                    order_id,
-                    attempt + 1,
-                )
+                return
             except Exception as exc:
-                if "BROWSER_SESSION_BROKEN" in str(exc):
+                if "BROWSER_SESSION_BROKEN" in str(exc) or RISK_CONTROL_ERROR_TOKEN in str(exc):
                     raise
                 if "Target page, context or browser has been closed" in str(exc):
                     raise RuntimeError("BROWSER_SESSION_BROKEN") from exc
-                self.logger.warning(
-                    "会话 | %s | esc-retry %s | %s",
-                    order_id,
-                    attempt + 1,
-                    exc,
-                )
-            await page.wait_for_timeout(300)
-        self.logger.warning("会话 | %s | esc-incomplete", order_id)
-        return False
+                self.logger.warning("会话归属释放 | esc-retry %s/3 | %s", attempt + 1, exc)
+                await page.wait_for_timeout(300)
+        self.logger.warning("会话归属释放 | esc-incomplete | 3次重试均失败")
 
     async def process_order(self, order_id: str, message: str) -> tuple[str, str]:
-        page = self.page
-        if page is None:
-            raise RuntimeError("浏览器工作页未初始化")
+        if self.context is None:
+            raise RuntimeError("浏览器上下文未初始化")
         max_retries = self.config.get("max_retries", 2)
 
         pre_snapshot = await self._get_doudian_order_snapshot(self.order_page, order_id) if self.order_page is not None else {}
@@ -973,13 +709,11 @@ class BrowserWorker:
                     return ("skipped", eligibility.reason)
 
                 await self._send_message(conversation_page, message)
-                exited = await self._exit_opened_conversation(conversation_page, order_id)
-                if not exited:
-                    self.logger.warning("会话 | %s | esc-exit-incomplete", order_id)
+                await self._release_conversation(conversation_page)
                 return ("sent", "message_sent")
             except Exception as e:
                 last_err = e
-                if RISK_CONTROL_ERROR_TOKEN in str(e) or SOFT_RISK_CONTROL_ERROR_TOKEN in str(e):
+                if RISK_CONTROL_ERROR_TOKEN in str(e):
                     raise
                 if "BROWSER_SESSION_BROKEN" in str(e):
                     raise

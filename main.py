@@ -10,7 +10,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from browser_worker import BrowserWorker, RISK_CONTROL_ERROR_TOKEN
+from browser_worker import BrowserWorker, LOGIN_STATE_MISSING_ERROR_TOKEN, RISK_CONTROL_ERROR_TOKEN
 from capture_storage_state import ensure_cdp_storage_state
 from excel_reader import ExcelOrderReader
 from launch_edge import kill_edge, resolve_browser_profile
@@ -22,6 +22,25 @@ QUIT_COMMANDS = {"q", "quit", "exit"}
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_VM_READ = 0x0010
 PROCESS_QUERY_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _disable_console_quickedit() -> None:
+    """Disable Windows CMD QuickEdit mode to prevent mouse selection from freezing the process."""
+    try:
+        kernel32 = ctypes.windll.kernel32
+        STD_INPUT_HANDLE = -10
+        ENABLE_QUICK_EDIT_MODE = 0x0040
+        ENABLE_EXTENDED_FLAGS = 0x0080
+        handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)
+        if handle == -1:
+            return
+        mode = ctypes.c_ulong()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return
+        new_mode = (mode.value | ENABLE_EXTENDED_FLAGS) & ~ENABLE_QUICK_EDIT_MODE
+        kernel32.SetConsoleMode(handle, new_mode)
+    except Exception:
+        pass
 
 
 class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
@@ -88,11 +107,15 @@ async def _wait_for_queue_item(
     return queue_task.result()
 
 
-async def _watch_for_exit_command(stop_event: asyncio.Event, logger) -> None:
+async def _watch_for_exit_command(stop_event: asyncio.Event, logger, enabled: bool) -> None:
+    if not enabled:
+        logger.info("已禁用交互式退出监听，当前进程将按无人值守模式运行")
+        return
     stdin = getattr(__import__("sys"), "stdin", None)
     if stdin is None or not getattr(stdin, "isatty", lambda: False)():
         logger.info("标准输入不可用，已禁用交互式退出监听")
         return
+    logger.info("交互式退出监听已启用：输入 q / quit / exit 可触发优雅退出")
     while not stop_event.is_set():
         try:
             command = await asyncio.to_thread(input, "")
@@ -339,6 +362,11 @@ async def _order_worker(
                 status = "failed"
                 reason = str(e)
                 logger.error("[%s] 风控 | %s | paused | %s", name, order_id, e)
+            elif LOGIN_STATE_MISSING_ERROR_TOKEN in str(e):
+                session_broken_event.set()
+                status = "failed"
+                reason = str(e)
+                logger.error("[%s] 登录态 | %s | missing | %s", name, order_id, e)
             else:
                 stats["failed"] += 1
                 should_advance_progress = True
@@ -373,7 +401,7 @@ async def _process_chunk(
     chunk_index: int,
     total_chunks: int,
     results_by_order_id: dict[str, dict[str, str]],
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, bool]:
     queue: asyncio.Queue = asyncio.Queue()
     for item in chunk_items:
         await queue.put(item)
@@ -382,6 +410,7 @@ async def _process_chunk(
     workers = [BrowserWorker(config, logger) for _ in range(min(num_workers, len(chunk_items)))]
 
     startup_failed = False
+    login_refresh_required = False
     if not dry_run and workers:
         logger.info("浏览器会话 %s/%s 准备启动浏览器，独立工作页=%s", chunk_index, total_chunks, len(workers))
         startup_results = []
@@ -398,6 +427,10 @@ async def _process_chunk(
                 if RISK_CONTROL_ERROR_TOKEN in str(error):
                     risk_control_event.set()
                     logger.error("启动 | chunk %s/%s | paused | %s", chunk_index, total_chunks, error)
+                elif LOGIN_STATE_MISSING_ERROR_TOKEN in str(error):
+                    session_broken_event.set()
+                    login_refresh_required = True
+                    logger.error("启动 | chunk %s/%s | login-missing | %s", chunk_index, total_chunks, error)
                 elif "BROWSER_SESSION_BROKEN" in str(error):
                     session_broken_event.set()
                     logger.error("启动 | chunk %s/%s | broken | %s", chunk_index, total_chunks, error)
@@ -413,7 +446,7 @@ async def _process_chunk(
             logger.info("浏览器会话 %s/%s 启动未完成，准备关闭已启动的浏览器", chunk_index, total_chunks)
             await asyncio.gather(*(worker.stop() for worker in workers), return_exceptions=True)
             logger.info("浏览器会话 %s/%s 已完成启动失败后的浏览器清理", chunk_index, total_chunks)
-        return session_broken_event.is_set(), risk_control_event.is_set()
+        return session_broken_event.is_set(), risk_control_event.is_set(), login_refresh_required
 
     tasks = [
         asyncio.create_task(
@@ -440,7 +473,7 @@ async def _process_chunk(
 
     if not tasks:
         queue_ref["queue"] = None
-        return session_broken_event.is_set(), risk_control_event.is_set()
+        return session_broken_event.is_set(), risk_control_event.is_set(), login_refresh_required
 
     try:
         task_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -453,7 +486,7 @@ async def _process_chunk(
             logger.info("浏览器会话 %s/%s 准备关闭浏览器", chunk_index, total_chunks)
             await asyncio.gather(*(worker.stop() for worker in workers), return_exceptions=True)
             logger.info("浏览器会话 %s/%s 浏览器已关闭", chunk_index, total_chunks)
-    return session_broken_event.is_set(), risk_control_event.is_set()
+    return session_broken_event.is_set(), risk_control_event.is_set(), login_refresh_required
 
 
 async def _pause_before_resume(
@@ -461,14 +494,20 @@ async def _pause_before_resume(
     stop_event: asyncio.Event,
     logger,
 ) -> bool:
-    resume_at = datetime.now() + timedelta(seconds=pause_seconds)
+    started_at = datetime.now()
+    resume_at = started_at + timedelta(seconds=pause_seconds)
     logger.warning("风控 | all-workers | paused %ss | resume_at=%s", pause_seconds, resume_at.strftime("%Y-%m-%d %H:%M:%S"))
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=pause_seconds)
         logger.info("暂停期间收到退出指令，本次保留恢复进度，等待下次启动继续。")
         return False
     except asyncio.TimeoutError:
-        logger.info("风控暂停时间已到，准备自动恢复任务。")
+        logger.info(
+            "风控暂停时间已到，准备自动恢复任务。 | paused_started_at=%s | resumed_at=%s | drift_seconds=%.1f",
+            started_at.strftime("%Y-%m-%d %H:%M:%S"),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            (datetime.now() - resume_at).total_seconds(),
+        )
         return True
 
 
@@ -611,6 +650,9 @@ async def run(
         logger.warning(
             "检测到未完成的暂停状态，但本次显式传入了 limit/parallel-workers，按新任务启动并忽略暂停恢复。"
         )
+        if not dry_run:
+            clear_runtime_state(config)
+            logger.info("已自动清理旧的暂停状态文件。")
         logger.info("启动: 总订单=%s | 本轮=%s | 并行页=%s", len(all_order_ids), len(order_ids), num_workers)
     else:
         logger.info("启动: 总订单=%s | 本轮=%s | 并行页=%s", len(all_order_ids), len(order_ids), num_workers)
@@ -627,7 +669,13 @@ async def run(
     session_broken_event = asyncio.Event()
     risk_control_event = asyncio.Event()
 
-    exit_task = asyncio.create_task(_watch_for_exit_command(stop_event, logger))
+    exit_task = asyncio.create_task(
+        _watch_for_exit_command(
+            stop_event,
+            logger,
+            bool(config.get("interactive_exit_listener", True)),
+        )
+    )
     resource_task = asyncio.create_task(
         _resource_monitor(stop_event, logger, queue_ref, stats_ref, progress_ref, resource_interval)
     )
@@ -666,7 +714,7 @@ async def run(
                 )
                 session_broken_event.clear()
                 risk_control_event.clear()
-                session_broken, risk_detected = await _process_chunk(
+                session_broken, risk_detected, login_refresh_required = await _process_chunk(
                     config,
                     logger,
                     chunk_items,
@@ -704,6 +752,11 @@ async def run(
                         state_path = save_runtime_state(config, snapshot)
                         logger.warning("已保存暂停进度: %s", state_path)
                         await asyncio.to_thread(_shutdown_pause_edge_resources, config, logger)
+                    break
+                if login_refresh_required and not stop_event.is_set():
+                    logger.warning("检测到飞鸽登录态缺失，下一轮将强制进入有头登录预热流程。")
+                    force_refresh_login = True
+                    order_ids = remaining_after_chunk
                     break
                 if session_broken and not stop_event.is_set():
                     logger.warning("检测到浏览器会话中断，本批次已提前停止接单，并将立即重连浏览器。")
@@ -826,6 +879,7 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    _disable_console_quickedit()
     args = parse_args()
     config = load_config(args.config)
     config["config_path"] = args.config

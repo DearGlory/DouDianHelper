@@ -161,7 +161,7 @@ async def ensure_cdp_storage_state(config_path: str, force_refresh: bool = False
     browser_cfg = config.get("browser", {})
     use_real_profile = bool(browser_cfg.get("use_real_user_profile", False))
     effective_mode = resolve_runtime_browser_mode(browser_cfg)
-    if effective_mode != "cdp" and not use_real_profile:
+    if effective_mode != "cdp" and not use_real_profile and not force_refresh:
         return None
 
     storage_state_path = Path(browser_cfg.get("bootstrap_storage_state_path", BOOTSTRAP_STORAGE_STATE))
@@ -176,7 +176,7 @@ async def ensure_cdp_storage_state(config_path: str, force_refresh: bool = False
         user_edge_was_running = had_running_edge(None)
         if not _cdp_is_ready(cdp_url):
             logger.warning("真实 Edge 未开启 CDP，准备重启为 9222/CDP 模式")
-            kill_edge(cdp_port=cdp_port, user_data_dir=user_data_dir, force_all=False)
+            kill_edge(cdp_port=cdp_port, user_data_dir=user_data_dir, force_all=True)
             launch_edge(edge_path, cdp_port, user_data_dir, profile_directory, False)
             if not wait_for_cdp(cdp_port):
                 raise RuntimeError(f"真实 Edge 重启后，CDP 端口 {cdp_port} 未就绪")
@@ -190,7 +190,7 @@ async def ensure_cdp_storage_state(config_path: str, force_refresh: bool = False
             return storage_state_path
         if await _capture_bootstrap_from_existing_cdp_session(config, storage_state_path, logger):
             return storage_state_path
-        raise RuntimeError("真实 Profile 当前无法直接提取有效登录态，请检查飞鸽是否已登录")
+        logger.warning("真实 Profile 当前无法直接提取有效登录态，转入有头人工登录预热流程")
 
     if headless and not force_refresh and storage_state_path.exists():
         if not _cdp_is_ready(cdp_url):

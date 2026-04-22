@@ -7,10 +7,10 @@ __pycache__/
 venv/
 .venv/
 
-# Runtime state / local config
-config.json
+# Runtime state
 config.json.pause_state.json
-config.local-notes.txt
+
+# Storage state (contains cookies/auth tokens)
 storage_state.json
 storage_state.bootstrap.json
 

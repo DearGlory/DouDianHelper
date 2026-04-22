@@ -215,11 +215,11 @@ def main() -> int:
         # headless 模式下由 main.py -> ensure_cdp_storage_state 统一管理 Edge 生命周期
         print("[INFO] Headless mode enabled, Edge lifecycle managed by main.py")
         print("Closing leftover automation Edge ...")
-        kill_edge(cdp_port=cdp_port, user_data_dir=user_data_dir, force_all=not use_real_profile)
+        kill_edge(cdp_port=cdp_port, user_data_dir=user_data_dir, force_all=True)
         return 0
 
     print("Closing Edge ...")
-    kill_edge(cdp_port=cdp_port, user_data_dir=user_data_dir, force_all=not use_real_profile)
+    kill_edge(cdp_port=cdp_port, user_data_dir=user_data_dir, force_all=True)
 
     print(f"[INFO] user_data_dir={user_data_dir}")
     print(f"[INFO] profile_directory={profile_directory}")

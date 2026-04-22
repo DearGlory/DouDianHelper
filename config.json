@@ -1,0 +1,120 @@
+{
+  // Excel 订单文件路径
+  "excel_path": "Order.xlsx",
+
+  // 发送给客户的邀评话术
+  "message_template": "退款3.00元【不用截图】【不用截图】【不用截图】亲小店活动，5★★★★★可以领取3员现金，收到后满意的话，辛苦您帮忙满星支持下了，您的满意是小店最大的荣誉，有问题 随时和我们说哦 这边及时给您处理好 祝您马年发大财",
+
+  // 日志级别：DEBUG / INFO / WARNING / ERROR
+  "log_level": "INFO",
+
+  // 日志文件路径；设为 null 则仅输出到终端
+  "log_file": "logs/doudian-helper.log",
+
+  // 是否启用命令行 q / quit / exit 交互退出监听
+  "interactive_exit_listener": true,
+
+
+  // 资源监控日志输出间隔（秒）
+  "resource_log_interval_seconds": 60,
+
+  // 每处理多少单后，整批 worker 优雅重启一次浏览器
+  "browser_restart_every_n_orders": 300,
+
+  // 触发风控后暂停多久再自动恢复（秒）
+  "risk_control_pause_seconds": 1800,
+
+  // 单个订单失败后的最大重试次数
+  "max_retries": 3,
+
+  // 每次重试的退避秒数基数；实际等待 = 此值 * 第几次重试
+  "retry_backoff_seconds": 2,
+
+  // 搜索动作最小间隔（毫秒），用于降低飞鸽搜索频率
+  "search_min_interval_ms": 2500,
+
+  // 搜索间隔抖动（毫秒），会在最小间隔基础上随机增加
+  "search_interval_jitter_ms": 700,
+
+  // 模拟逐字输入时的基础延迟（毫秒）
+  "search_type_delay_ms": 120,
+
+  // 模拟逐字输入时的随机抖动（毫秒）
+  "search_type_jitter_ms": 80,
+
+  // 页面通用等待时间（毫秒）
+  "default_wait_ms": 3000,
+
+  // 在搜索框输入订单号后，等待搜索结果刷新的时间（毫秒）
+  "search_after_input_wait_ms": 1000,
+
+  // 点击发送后等待消息落地的时间（毫秒）
+  "post_send_wait_ms": 1000,
+
+  // 打开会话后等待飞鸽订单信息加载的时间（毫秒）
+  "feige_load_wait_ms": 7000,
+
+  "browser": {
+    // 浏览器连接模式：当前使用 cdp
+    "mode": "launch",
+
+    // CDP 调试地址
+    "cdp_url": "http://127.0.0.1:9222",
+
+    // 是否复用真实在用的 Edge 用户配置目录
+    "use_real_user_profile": true,
+
+    // 真实 Edge 用户数据目录；auto 表示自动识别当前电脑默认目录
+    "user_data_dir": "auto",
+
+    // 真实 Edge Profile 名称；auto 表示自动识别 Default / 最近活跃 profile
+    "profile_directory": "auto",
+
+    // 旧 storage state 文件；CDP 运行时不再主动回写
+    "storage_state_path": "storage_state.json",
+
+    // headless 登录预热时保存的 bootstrap 登录态
+    "bootstrap_storage_state_path": "storage_state.bootstrap.json",
+
+    // 是否以无头模式正式运行
+    "headless": true,
+
+    // 用于识别目标飞鸽页面的 URL 关键字
+    "target_url_keywords": [
+      "im.jinritemai.com",
+      "pc_seller"
+    ]
+  },
+
+  "selectors": {
+    // 飞鸽左上角搜索输入框
+    "feige_search_input": "input.auxo-input",
+
+    // 搜索结果下拉面板
+    "feige_search_dropdown": "div.fuzzySearchPanelOverlay",
+
+    // 飞鸽聊天输入框
+    "feige_input": "textarea.Q0ZcClfcpfuWyhFPU3gR",
+
+    // 飞鸽发送按钮
+    "feige_send_button": "div.xyr2h3Spq6gTVjER_ECV",
+
+    // 订单卡片里的售后标记
+    "after_sale_flag": "div._871b237cd9b14d4b746be28ae9b57e65-less"
+  },
+
+  // Excel 中可识别为订单号的列名别名
+  "order_id_aliases": [
+    "订单号",
+    "订单编号",
+    "主订单号",
+    "父订单号",
+    "订单ID",
+    "order_id",
+    "orderid",
+    "订单"
+  ]
+}
+
+
+
