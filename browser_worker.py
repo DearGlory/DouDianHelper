@@ -672,7 +672,7 @@ class BrowserWorker:
         # 飞鸽页这里只保留订单管理页做不到的条件，例如评价状态。
         try:
             await page.wait_for_selector(
-                "div.ecom-collapse", state="visible", timeout=20_000
+                "div.ecom-collapse", state="visible", timeout=10_000
             )
         except Exception as exc:
             self.logger.warning("订单 %s：订单卡片未加载，降级到飞鸽搜索", order_id)
