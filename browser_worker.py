@@ -701,6 +701,18 @@ class BrowserWorker:
                 "div.ecom-collapse", state="visible", timeout=20_000
             )
         except Exception as exc:
+            # dump 整页 HTML 供事后分析
+            try:
+                from datetime import datetime
+                dump_dir = Path("logs")
+                dump_dir.mkdir(exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                dump_path = dump_dir / f"page-dump-{ts}.html"
+                html = await page.content()
+                dump_path.write_text(html, encoding="utf-8")
+                self.logger.info("订单卡片未加载，已保存页面 DOM 到 %s", dump_path)
+            except Exception as dump_err:
+                self.logger.warning("DOM dump 失败: %s", dump_err)
             if await self._detect_env_risk_dialog(page):
                 raise RuntimeError("ENV_RISK_DIALOG_DETECTED") from exc
             raise RuntimeError(f"订单卡片未加载: {exc}") from exc
