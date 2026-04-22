@@ -343,11 +343,13 @@ class BrowserWorker:
         """检测飞鸽「当前环境存在风险，请稍后重试」弹窗。
 
         双重检测：先按文字精确匹配，再按弹窗容器 + 文字匹配。
+        检测成功时保存匹配元素的 HTML 到 logs/ 供后续减重。
         """
         try:
             # 策略1：直接搜页面文字（最可靠）
             text_loc = page.get_by_text(self.ENV_RISK_DIALOG_TEXT, exact=False)
             if await text_loc.count() > 0 and await text_loc.first.is_visible():
+                await self._dump_detected_element(page, text_loc.first, "text-match")
                 return True
             # 策略2：遍历常见弹窗容器
             combined = ", ".join(self.ENV_RISK_DIALOG_SELECTORS)
@@ -359,10 +361,29 @@ class BrowserWorker:
                     continue
                 text = await modal.inner_text()
                 if self.ENV_RISK_DIALOG_TEXT in text:
+                    await self._dump_detected_element(page, modal, "modal-match")
                     return True
             return False
         except Exception:
             return False
+
+    async def _dump_detected_element(self, page: Page, element, strategy: str) -> None:
+        """保存检测到的风控元素 HTML，供后续精准选择器减重。"""
+        try:
+            from datetime import datetime
+            dump_dir = Path("logs")
+            dump_dir.mkdir(exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            el_html = await element.evaluate("el => el.outerHTML")
+            parent_html = await element.evaluate(
+                "el => el.parentElement ? el.parentElement.outerHTML.substring(0, 2000) : 'no-parent'"
+            )
+            dump_path = dump_dir / f"risk-element-{ts}.html"
+            content = f"<!-- strategy: {strategy} -->\n<!-- ELEMENT -->\n{el_html}\n\n<!-- PARENT -->\n{parent_html}"
+            dump_path.write_text(content, encoding="utf-8")
+            self.logger.info("风控元素已保存到 %s (策略: %s)", dump_path, strategy)
+        except Exception as err:
+            self.logger.warning("风控元素 dump 失败: %s", err)
 
     async def _raise_if_risk_control_detected(self, page: Page) -> None:
         detail = await self._detect_risk_control(page)
@@ -707,20 +728,17 @@ class BrowserWorker:
                 loading_hint = page.locator("text=正在加载中")
                 is_loading = await loading_hint.count() > 0 and await loading_hint.first.is_visible()
                 if is_loading and load_attempt < loading_retries - 1:
-                    self.logger.info("订单 %s：订单卡片仍在加载，额外等待 20s（%s/%s）", order_id, load_attempt + 1, loading_retries)
-                    continue
-                # 最终失败，dump HTML
-                try:
-                    from datetime import datetime
-                    dump_dir = Path("logs")
-                    dump_dir.mkdir(exist_ok=True)
-                    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-                    dump_path = dump_dir / f"page-dump-{ts}.html"
-                    html = await page.content()
-                    dump_path.write_text(html, encoding="utf-8")
-                    self.logger.info("订单卡片未加载，已保存页面 DOM 到 %s", dump_path)
-                except Exception as dump_err:
-                    self.logger.warning("DOM dump 失败: %s", dump_err)
+                    self.logger.info("订单 %s：检测到“正在加载中”，快速重试 3×1s", order_id)
+                    for quick in range(3):
+                        await page.wait_for_timeout(1_000)
+                        card = page.locator("div.ecom-collapse")
+                        if await card.count() > 0 and await card.first.is_visible():
+                            self.logger.info("订单 %s：快速重试 %s/3 成功", order_id, quick + 1)
+                            break
+                    else:
+                        self.logger.warning("订单 %s：“正在加载中”3次重试均失败，视为风控，降级搜索", order_id)
+                        raise RuntimeError("ENV_RISK_DIALOG_DETECTED") from exc
+                    break
                 if await self._detect_env_risk_dialog(page):
                     raise RuntimeError("ENV_RISK_DIALOG_DETECTED") from exc
                 raise RuntimeError(f"订单卡片未加载: {exc}") from exc
