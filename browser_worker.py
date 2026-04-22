@@ -670,31 +670,13 @@ class BrowserWorker:
         self.logger.info("订单 %s：开始飞鸽页剩余校验", order_id)
         # 订单管理页已完成：备注/已完成/售后状态预检
         # 飞鸽页这里只保留订单管理页做不到的条件，例如评价状态。
-        loading_retries = 2
-        for load_attempt in range(loading_retries):
-            try:
-                await page.wait_for_selector(
-                    "div.ecom-collapse", state="visible", timeout=20_000
-                )
-                break
-            except Exception as exc:
-                loading_hint = page.locator("text=正在加载中")
-                is_loading = await loading_hint.count() > 0 and await loading_hint.first.is_visible()
-                if is_loading and load_attempt < loading_retries - 1:
-                    self.logger.info("订单 %s：检测到“正在加载中”，快速重试 3×1s", order_id)
-                    for quick in range(3):
-                        await page.wait_for_timeout(1_000)
-                        card = page.locator("div.ecom-collapse")
-                        if await card.count() > 0 and await card.first.is_visible():
-                            self.logger.info("订单 %s：快速重试 %s/3 成功", order_id, quick + 1)
-                            break
-                    else:
-                        self.logger.warning("订单 %s：“正在加载中”3次重试均失败，视为风控，降级搜索", order_id)
-                        raise RuntimeError("ENV_RISK_DIALOG_DETECTED") from exc
-                    break
-                if await self._detect_env_risk_dialog(page):
-                    raise RuntimeError("ENV_RISK_DIALOG_DETECTED") from exc
-                raise RuntimeError(f"订单卡片未加载: {exc}") from exc
+        try:
+            await page.wait_for_selector(
+                "div.ecom-collapse", state="visible", timeout=20_000
+            )
+        except Exception as exc:
+            self.logger.warning("订单 %s：订单卡片未加载，降级到飞鸽搜索", order_id)
+            raise RuntimeError("ENV_RISK_DIALOG_DETECTED") from exc
 
         try:
             card_text = (await page.locator("div.ecom-collapse").first.inner_text()).strip()
