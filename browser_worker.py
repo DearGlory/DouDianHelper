@@ -387,6 +387,7 @@ class BrowserWorker:
         self.logger.info("订单 %s：复用抖店订单页", order_id)
         await page.bring_to_front()
         await page.wait_for_timeout(300)
+        await self._raise_if_risk_control_detected(page)
 
         input_candidates = [
             page.locator("input[placeholder='请输入']").nth(0),
@@ -411,19 +412,30 @@ class BrowserWorker:
             raise RuntimeError(f"订单管理页搜索框不可用: {last_error}")
 
         self.logger.info("订单 %s：输入订单号", order_id)
-        await order_input.click(timeout=3_000)
+        await self._raise_if_risk_control_detected(page)
+        try:
+            await order_input.click(timeout=3_000)
+        except TimeoutError as exc:
+            if "intercepts pointer events" in str(exc):
+                await self._raise_if_risk_control_detected(page)
+            raise
         await page.keyboard.press("Control+A")
         await page.keyboard.press("Backspace")
         await order_input.type(order_id, delay=40)
 
         self.logger.info("订单 %s：提交订单搜索", order_id)
         query_button = page.get_by_role("button", name="查询").first
+        await self._raise_if_risk_control_detected(page)
         try:
             await query_button.click(timeout=3_000)
-        except Exception:
-            await page.keyboard.press("Enter")
+        except Exception as exc:
+            if "intercepts pointer events" in str(exc):
+                await self._raise_if_risk_control_detected(page)
+            else:
+                await page.keyboard.press("Enter")
 
         await page.wait_for_timeout(1800)
+        await self._raise_if_risk_control_detected(page)
         self.logger.info("订单 %s：等待搜索结果", order_id)
         container = page.locator("table, div.index_orderList__axNH7, div.index_latestOrderList__wfoJq, .auxo-table-wrapper").first
         await container.wait_for(state="visible", timeout=10_000)
