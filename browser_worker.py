@@ -426,9 +426,7 @@ class BrowserWorker:
             if "intercepts pointer events" in str(exc):
                 await self._raise_if_risk_control_detected(page)
             raise
-        await page.keyboard.press("Control+A")
-        await page.keyboard.press("Backspace")
-        await order_input.type(order_id, delay=40)
+        await order_input.fill(order_id)
 
         self.logger.info("订单 %s：提交订单搜索", order_id)
         query_button = page.get_by_role("button", name="查询").first
@@ -441,7 +439,6 @@ class BrowserWorker:
             else:
                 await page.keyboard.press("Enter")
 
-        await page.wait_for_timeout(1800)
         await self._raise_if_risk_control_detected(page)
         self.logger.info("订单 %s：等待搜索结果", order_id)
         container = page.locator("table, div.index_orderList__axNH7, div.index_latestOrderList__wfoJq, .auxo-table-wrapper").first
@@ -450,7 +447,7 @@ class BrowserWorker:
 
     async def _get_doudian_order_snapshot(self, page: Page, order_id: str) -> dict[str, str]:
         await self._search_order_in_doudian(page, order_id)
-        await page.wait_for_timeout(800)
+        await page.wait_for_timeout(200)
         snapshot = await page.evaluate(
             """
             (targetOrderId) => {
@@ -614,18 +611,15 @@ class BrowserWorker:
         await search_input.click()
         await self._raise_if_risk_control_detected(page)
 
-        await search_input.press("Control+A")
-        await search_input.press("Backspace")
-        await page.wait_for_timeout(random.randint(200, 400))
-
-        type_delay = int(self.config.get("search_type_delay_ms", 120))
-        type_jitter = int(self.config.get("search_type_jitter_ms", 80))
-        for ch in order_id:
-            await search_input.type(ch, delay=max(20, type_delay + random.randint(-type_jitter, type_jitter)))
+        await search_input.fill(order_id)
 
         await self._raise_if_risk_control_detected(page)
-        input_wait = int(self.config.get("search_after_input_wait_ms", 1000))
-        await page.wait_for_timeout(input_wait + random.randint(100, 500))
+        try:
+            await search_input.press("Enter")
+        except Exception:
+            pass
+        input_wait = min(600, int(self.config.get("search_after_input_wait_ms", 1000)))
+        await page.wait_for_timeout(input_wait)
 
         sel_dropdown = self._sel("feige_search_dropdown")
         candidates = [
@@ -645,7 +639,7 @@ class BrowserWorker:
         if contact is None:
             try:
                 await search_input.press("Enter")
-                await page.wait_for_timeout(max(800, input_wait // 2) + random.randint(120, 360))
+                await page.wait_for_timeout(max(400, input_wait // 2))
             except Exception:
                 pass
             for candidate in candidates:
@@ -748,7 +742,6 @@ class BrowserWorker:
             raise RuntimeError("CHAT_INPUT_NOT_FOUND: 聊天输入框未出现，跳过该订单") from e
         await self._ensure_page_ready(page)
         await page.fill(sel_input, text)
-        await page.wait_for_timeout(300)
         try:
             await page.click(sel_send)
         except TimeoutError as exc:
