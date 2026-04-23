@@ -416,6 +416,10 @@ class BrowserWorker:
 
     async def _resolve_review_icon_button(self, card_root, card_header):
         candidate_locators = [
+            card_header.get_by_role("button", name="邀评", exact=True),
+            card_root.get_by_role("button", name="邀评", exact=True),
+            card_header.locator("button").filter(has_text="邀评"),
+            card_root.locator("button").filter(has_text="邀评"),
             card_header.locator("span.i-icon-look-evaluate"),
             card_root.locator("span.i-icon-look-evaluate"),
             card_header.locator("[class*='i-icon-look-evaluate']"),
@@ -500,13 +504,14 @@ class BrowserWorker:
 
         await self._raise_if_risk_control_detected(page)
         self.logger.info("订单 %s：等待搜索结果", order_id)
-        container = page.locator("table, div.index_orderList__axNH7, div.index_latestOrderList__wfoJq, .auxo-table-wrapper").first
-        return await self._wait_text_in_locator(page, container, order_id, "订单管理页搜索结果")
+        order_row = page.get_by_text(f"订单编号 {order_id}", exact=False).first
+        await self._wait_locator_visible(page, order_row, "订单管理页结果头行")
+        return await self._wait_text_in_locator(page, order_row, order_id, "订单管理页结果头行")
 
     async def _get_doudian_order_snapshot(self, page: Page, order_id: str) -> dict[str, str]:
         await self._search_order_in_doudian(page, order_id)
-        container = page.locator("table, div.index_orderList__axNH7, div.index_latestOrderList__wfoJq, .auxo-table-wrapper").first
-        await self._wait_text_in_locator(page, container, order_id, "订单管理页快照结果")
+        order_row = page.get_by_text(f"订单编号 {order_id}", exact=False).first
+        await self._wait_text_in_locator(page, order_row, order_id, "订单管理页快照结果")
         snapshot = await page.evaluate(
             """
             (targetOrderId) => {
