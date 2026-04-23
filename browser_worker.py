@@ -290,10 +290,51 @@ class BrowserWorker:
     def _feige_send_button_locator(self, page: Page):
         return page.locator("#im-input-box").get_by_role("button", name="发送", exact=True).first
 
-    def _feige_chat_area_locator(self, page: Page):
-        return page.locator("#workspace-chat").first
+    async def _focus_feige_search_input(self, page: Page):
+        search_input = self._feige_search_input_locator(page)
+        await self._wait_locator_visible(page, search_input, "飞鸽搜索框")
+        for attempt in range(4):
+            await self._dismiss_any_modal_overlay(page)
+            await self._raise_if_risk_control_detected(page)
+            try:
+                await search_input.click(timeout=2_000)
+                return search_input
+            except Exception as exc:
+                message = str(exc)
+                if "intercepts pointer events" not in message:
+                    if attempt == 3:
+                        raise
+                try:
+                    await search_input.focus()
+                    return search_input
+                except Exception:
+                    if attempt == 3:
+                        raise
+                await page.keyboard.press("Escape")
+                await self._dismiss_any_modal_overlay(page)
+                if attempt < 3:
+                    await page.wait_for_timeout(200)
+        return search_input
 
-    async def _ensure_logged_in(self, page: Page) -> None:
+    async def _dismiss_any_modal_overlay(self, page: Page) -> bool:
+        dismissed = False
+        for _ in range(3):
+            current = await self._dismiss_blocking_modal(page)
+            overlay = page.locator("div[role='dialog'].auxo-modal-wrap, div.auxo-modal-wrap")
+            try:
+                visible = await overlay.count() > 0 and await overlay.first.is_visible()
+            except Exception:
+                visible = False
+            if not visible:
+                return dismissed or current
+            dismissed = dismissed or current
+            try:
+                await page.keyboard.press("Escape")
+            except Exception:
+                pass
+            await page.wait_for_timeout(150)
+        return dismissed
+
         body_text = await page.locator("body").inner_text()
         if any(text in body_text for text in self.LOGIN_REQUIRED_TEXTS):
             browser_cfg = self.config.get("browser", {})
@@ -660,9 +701,7 @@ class BrowserWorker:
 
     async def _search_conversation_in_existing_feige_page(self, page: Page, order_id: str) -> Page:
         sel_search = self._sel("feige_search_input")
-        search_input = self._feige_search_input_locator(page)
-        await self._wait_locator_visible(page, search_input, "飞鸽搜索框")
-        await search_input.click()
+        search_input = await self._focus_feige_search_input(page)
         await self._raise_if_risk_control_detected(page)
         await search_input.fill(order_id)
         try:
