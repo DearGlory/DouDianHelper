@@ -416,12 +416,10 @@ class BrowserWorker:
 
     async def _resolve_review_icon_button(self, card_root, card_header):
         candidate_locators = [
-            card_header.get_by_role("button", name="邀评", exact=True),
-            card_root.get_by_role("button", name="邀评", exact=True),
-            card_header.locator("button").filter(has_text="邀评"),
-            card_root.locator("button").filter(has_text="邀评"),
             card_header.locator("span.i-icon-look-evaluate"),
             card_root.locator("span.i-icon-look-evaluate"),
+            card_header.locator("span.i-icon.i-icon-look-evaluate[is_disabled]"),
+            card_root.locator("span.i-icon.i-icon-look-evaluate[is_disabled]"),
             card_header.locator("[class*='i-icon-look-evaluate']"),
             card_root.locator("[class*='i-icon-look-evaluate']"),
             card_header.get_by_role("button", name="评", exact=True),
