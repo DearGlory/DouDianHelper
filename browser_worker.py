@@ -665,13 +665,13 @@ class BrowserWorker:
         except Exception:
             pass
 
-        sel_dropdown = self._sel("feige_search_dropdown")
-        dropdown = page.locator(sel_dropdown)
-        await self._wait_text_in_locator(page, dropdown.first, order_id, "飞鸽搜索下拉结果")
+        result_text = f"来自订单：{order_id}"
+        result_hint = page.get_by_text(result_text, exact=False).first
+        await self._wait_locator_visible(page, result_hint, "飞鸽搜索结果项")
         candidates = [
-            dropdown.get_by_text("来自订单", exact=False).first,
-            dropdown.get_by_text(order_id, exact=False).first,
-            page.get_by_text("来自订单", exact=False).first,
+            result_hint,
+            page.get_by_text("联系人", exact=False).filter(has=page.get_by_text(result_text, exact=False)).first,
+            page.get_by_text(order_id, exact=False).first,
         ]
         contact = None
         for candidate in candidates:
