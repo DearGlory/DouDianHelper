@@ -5,6 +5,7 @@ cd /d "%~dp0"
 
 set "LIMIT_ARG="
 set "PARALLEL_ARG="
+set "NODE_NO_WARNINGS=1"
 set "LOG_DIR=%cd%\logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "RUN_TS=%%I"
@@ -63,7 +64,7 @@ pause
 exit /b 1
 
 :launch_edge
-powershell -NoProfile -Command "$ErrorActionPreference='Continue'; & 'venv\Scripts\python.exe' 'launch_edge.py' 2>&1 | Tee-Object -FilePath '%LAUNCH_LOG%'"
+powershell -NoProfile -Command "$ErrorActionPreference='Continue'; if ($PSVersionTable.PSVersion.Major -ge 7) { $PSNativeCommandUseErrorActionPreference = $false }; & 'venv\Scripts\python.exe' 'launch_edge.py' 2>&1 | Tee-Object -FilePath '%LAUNCH_LOG%'"
 if errorlevel 1 goto cdp_failed
 goto run_main
 
@@ -78,7 +79,7 @@ echo ============================================
 echo   Running DouDianHelper ...
 echo ============================================
 echo Type q / quit / exit then press Enter to stop gracefully.
-powershell -NoProfile -Command "$ErrorActionPreference='Continue'; & 'venv\Scripts\python.exe' 'main.py' %PARALLEL_ARG% %LIMIT_ARG% 2>&1 | Tee-Object -FilePath '%MAIN_LOG%'"
+powershell -NoProfile -Command "$ErrorActionPreference='Continue'; if ($PSVersionTable.PSVersion.Major -ge 7) { $PSNativeCommandUseErrorActionPreference = $false }; & 'venv\Scripts\python.exe' 'main.py' %PARALLEL_ARG% %LIMIT_ARG% 2>&1 | Tee-Object -FilePath '%MAIN_LOG%'"
 
 echo.
 echo [INFO] launch log: %LAUNCH_LOG%
