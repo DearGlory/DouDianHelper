@@ -5,7 +5,9 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
+import traceback
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -23,6 +25,19 @@ BROWSER_CANDIDATES = [
     ("Chrome", Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")),
     ("Chrome", Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe")),
 ]
+LAUNCH_LOG_DIR = Path("log")
+LAUNCH_LOG_PATH = LAUNCH_LOG_DIR / "launch_edge.log"
+
+
+def log_line(message: str) -> None:
+    print(message)
+    try:
+        LAUNCH_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with LAUNCH_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(message + "\n")
+    except Exception:
+        pass
+
 
 
 def load_config(path: str) -> dict:
@@ -317,32 +332,40 @@ def main() -> int:
 
     if headless:
         # headless 模式下由 main.py -> ensure_cdp_storage_state 统一管理 Edge 生命周期
-        print("[INFO] Headless mode enabled, Edge lifecycle managed by main.py")
-        print("Closing leftover automation Edge ...")
+        log_line("[INFO] Headless mode enabled, Edge lifecycle managed by main.py")
+        log_line("Closing leftover automation Edge ...")
         kill_edge(cdp_port=cdp_port, user_data_dir=user_data_dir, force_all=True)
         return 0
 
-    print("Closing Edge ...")
+    log_line("Closing Edge ...")
     kill_edge(cdp_port=cdp_port, user_data_dir=user_data_dir, force_all=True)
 
-    print(f"[INFO] user_data_dir={user_data_dir}")
-    print(f"[INFO] profile_directory={profile_directory}")
-    print(f"[INFO] use_real_user_profile={use_real_profile}")
-    print("Launching Edge ...")
+    log_line(f"[INFO] user_data_dir={user_data_dir}")
+    log_line(f"[INFO] profile_directory={profile_directory}")
+    log_line(f"[INFO] use_real_user_profile={use_real_profile}")
+    log_line("Launching Edge ...")
 
     try:
         launch_edge(edge_path, cdp_port, user_data_dir, profile_directory, headless)
     except subprocess.CalledProcessError:
-        print("[ERROR] Failed to launch Edge")
+        log_line("[ERROR] Failed to launch Edge")
         return 1
 
     if not wait_for_cdp(cdp_port):
-        print(f"[ERROR] CDP port {cdp_port} not responding")
+        log_line(f"[ERROR] CDP port {cdp_port} not responding")
         return 1
 
-    print("CDP OK - Edge is ready")
+    log_line("CDP OK - Edge is ready")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception:
+        tb = traceback.format_exc()
+        log_line(tb.rstrip())
+        sys.stderr.write(tb)
+        raise
