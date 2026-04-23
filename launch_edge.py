@@ -25,7 +25,7 @@ BROWSER_CANDIDATES = [
     ("Chrome", Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")),
     ("Chrome", Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe")),
 ]
-LAUNCH_LOG_DIR = Path("log")
+LAUNCH_LOG_DIR = Path("logs")
 LAUNCH_LOG_PATH = LAUNCH_LOG_DIR / "launch_edge.log"
 
 

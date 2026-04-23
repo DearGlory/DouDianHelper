@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 set "LIMIT_ARG="
 set "PARALLEL_ARG="
-set "LOG_DIR=%cd%\log"
+set "LOG_DIR=%cd%\logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "RUN_TS=%%I"
 set "LAUNCH_LOG=%LOG_DIR%\launch_edge-%RUN_TS%.log"

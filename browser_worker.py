@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,35 @@ def resolve_runtime_browser_mode(browser_cfg: dict) -> str:
     if bool(browser_cfg.get("headless", False)):
         return "launch"
     return str(browser_cfg.get("mode", "cdp")).strip().lower() or "cdp"
+
+
+def resolve_launch_browser_executable(browser_cfg: dict) -> str | None:
+    explicit = str(browser_cfg.get("executable_path", "")).strip().strip('"').strip("'")
+    if explicit and Path(os.path.expandvars(explicit)).expanduser().exists():
+        return str(Path(os.path.expandvars(explicit)).expanduser())
+
+    for env_name in ("EDGE_PATH", "BROWSER_PATH"):
+        env_value = str(os.environ.get(env_name, "")).strip().strip('"').strip("'")
+        if env_value and Path(os.path.expandvars(env_value)).expanduser().exists():
+            return str(Path(os.path.expandvars(env_value)).expanduser())
+
+    for exe_name in ("msedge.exe", "msedge", "chrome.exe", "chrome"):
+        which_path = shutil.which(exe_name)
+        if which_path:
+            return which_path
+
+    candidates = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    for raw in candidates:
+        path = Path(os.path.expandvars(raw)).expanduser()
+        if path.exists():
+            return str(path)
+    return None
 
 
 class BrowserWorker:
@@ -125,10 +156,15 @@ class BrowserWorker:
                 self.context = await self.browser.new_context()
         else:
             storage_state = await self._load_storage_state()
-            self.browser = await self.playwright.chromium.launch(
-                headless=browser_cfg.get("headless", False),
-                channel="msedge",
-            )
+            executable_path = resolve_launch_browser_executable(browser_cfg)
+            launch_kwargs = {
+                "headless": browser_cfg.get("headless", False),
+            }
+            if executable_path:
+                launch_kwargs["executable_path"] = executable_path
+            else:
+                launch_kwargs["channel"] = "msedge"
+            self.browser = await self.playwright.chromium.launch(**launch_kwargs)
             if storage_state is not None:
                 self.context = await self.browser.new_context(storage_state=storage_state)
             else:
