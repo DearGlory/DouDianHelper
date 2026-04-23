@@ -624,9 +624,47 @@ class BrowserWorker:
         page = await self.context.new_page()
         await page.set_viewport_size({"width": 1920, "height": 1080})
         await page.goto(jump_url, wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(self.config.get("default_wait_ms", 3000))
+        await self._wait_locator_visible(page, page.locator("body").first, "飞鸽会话页")
         await self._ensure_logged_in(page)
         self.logger.info("订单 %s：已直达飞鸽会话", order_id)
+        return page
+
+    async def _search_conversation_in_existing_feige_page(self, page: Page, order_id: str) -> Page:
+        sel_search = self._sel("feige_search_input")
+        search_input = page.locator(sel_search).first
+        await self._wait_locator_visible(page, search_input, "飞鸽搜索框")
+        await search_input.click()
+        await self._raise_if_risk_control_detected(page)
+        await search_input.fill(order_id)
+        try:
+            await search_input.press("Enter")
+        except Exception:
+            pass
+
+        sel_dropdown = self._sel("feige_search_dropdown")
+        dropdown = page.locator(sel_dropdown)
+        await self._wait_text_in_locator(page, dropdown.first, order_id, "飞鸽搜索下拉结果")
+        candidates = [
+            dropdown.get_by_text("来自订单", exact=False).first,
+            dropdown.get_by_text(order_id, exact=False).first,
+            page.get_by_text("来自订单", exact=False).first,
+        ]
+        contact = None
+        for candidate in candidates:
+            try:
+                if await candidate.count() > 0 and await candidate.is_visible():
+                    contact = candidate
+                    break
+            except Exception:
+                continue
+        if contact is None:
+            raise RuntimeError(f"飞鸽搜索未找到订单 {order_id} 的联系人")
+
+        await self._raise_if_risk_control_detected(page)
+        await contact.click()
+        await self._wait_locator_visible(page, page.locator(self._sel("feige_input")).first, "飞鸽聊天输入框")
+        await self._raise_if_risk_control_detected(page)
+        self.logger.info("订单 %s：飞鸽搜索降级成功，已打开会话", order_id)
         return page
 
     async def _open_conversation_via_feige_search(self, order_id: str) -> Page:
@@ -643,61 +681,7 @@ class BrowserWorker:
         )
         await self._ensure_logged_in(page)
         await self._raise_if_risk_control_detected(page)
-
-        sel_search = self._sel("feige_search_input")
-        search_input = page.locator(sel_search).first
-        await search_input.wait_for(state="visible", timeout=10_000)
-        await search_input.click()
-        await self._raise_if_risk_control_detected(page)
-
-        await search_input.fill(order_id)
-
-        await self._raise_if_risk_control_detected(page)
-        try:
-            await search_input.press("Enter")
-        except Exception:
-            pass
-        input_wait = min(600, int(self.config.get("search_after_input_wait_ms", 1000)))
-        await page.wait_for_timeout(input_wait)
-
-        sel_dropdown = self._sel("feige_search_dropdown")
-        candidates = [
-            page.locator(sel_dropdown).get_by_text("来自订单", exact=False).first,
-            page.locator(sel_dropdown).get_by_text(order_id, exact=False).first,
-            page.get_by_text("来自订单", exact=False).first,
-        ]
-        contact = None
-        for candidate in candidates:
-            try:
-                await candidate.wait_for(state="visible", timeout=2_000)
-                contact = candidate
-                break
-            except Exception:
-                continue
-
-        if contact is None:
-            try:
-                await search_input.press("Enter")
-                await page.wait_for_timeout(max(400, input_wait // 2))
-            except Exception:
-                pass
-            for candidate in candidates:
-                try:
-                    await candidate.wait_for(state="visible", timeout=1_500)
-                    contact = candidate
-                    break
-                except Exception:
-                    continue
-
-        if contact is None:
-            raise RuntimeError(f"飞鸽搜索未找到订单 {order_id} 的联系人")
-
-        await self._raise_if_risk_control_detected(page)
-        await contact.click()
-        await page.wait_for_timeout(self.config.get("feige_load_wait_ms", 5000))
-        await self._raise_if_risk_control_detected(page)
-        self.logger.info("订单 %s：飞鸽搜索降级成功，已打开会话", order_id)
-        return page
+        return await self._search_conversation_in_existing_feige_page(page, order_id)
 
     async def _check_eligibility(self, page: Page, order_id: str) -> EligibilityResult:
         self.logger.info("订单 %s：开始飞鸽页剩余校验", order_id)
@@ -777,6 +761,12 @@ class BrowserWorker:
         sel_send = self._sel("feige_send_button")
         await self._wait_locator_visible(page, page.locator(sel_input).first, "聊天输入框")
         await self._ensure_page_ready(page)
+        message_echo = page.get_by_text(text, exact=False)
+        before_count = 0
+        try:
+            before_count = await message_echo.count()
+        except Exception:
+            before_count = 0
         await page.fill(sel_input, text)
         try:
             await page.click(sel_send)
@@ -785,6 +775,18 @@ class BrowserWorker:
                 raise
             await self._ensure_page_ready(page)
             await page.click(sel_send)
+        for attempt in range(5):
+            try:
+                after_count = await message_echo.count()
+                if after_count > before_count:
+                    await message_echo.nth(after_count - 1).scroll_into_view_if_needed()
+                    await self._raise_if_risk_control_detected(page)
+                    return
+            except Exception:
+                pass
+            if attempt < 4:
+                await self._raise_if_risk_control_detected(page)
+                await page.wait_for_timeout(1000)
         await self._wait_text_in_locator(page, page.locator("body").first, text, "发送后消息回显")
         await self._raise_if_risk_control_detected(page)
 
@@ -824,9 +826,8 @@ class BrowserWorker:
                 await self._ensure_page_ready(conversation_page)
 
                 if await self._detect_env_risk_dialog(conversation_page):
-                    self.logger.warning("订单 %s：直达链接触发环境风险弹窗，降级到飞鸽搜索", order_id)
-                    await conversation_page.close()
-                    conversation_page = await self._open_conversation_via_feige_search(order_id)
+                    self.logger.warning("订单 %s：直达链接触发环境风险弹窗，直接复用当前飞鸽页搜索", order_id)
+                    await self._search_conversation_in_existing_feige_page(conversation_page, order_id)
                     await self._ensure_page_ready(conversation_page)
 
                 eligibility = await self._check_eligibility(conversation_page, order_id)
@@ -847,15 +848,12 @@ class BrowserWorker:
                 if "CHAT_INPUT_NOT_FOUND" in str(e):
                     return ("skipped", "聊天输入框不可用，跳过")
                 if "ENV_RISK_DIALOG_DETECTED" in str(e):
-                    self.logger.warning("订单 %s：检测到环境风险弹窗，降级到飞鸽搜索", order_id)
-                    if conversation_page is not None:
-                        try:
-                            await conversation_page.close()
-                        except Exception:
-                            pass
-                        conversation_page = None
+                    self.logger.warning("订单 %s：检测到环境风险弹窗，复用当前飞鸽页搜索", order_id)
                     try:
-                        conversation_page = await self._open_conversation_via_feige_search(order_id)
+                        if conversation_page is None:
+                            conversation_page = await self._open_conversation_via_feige_search(order_id)
+                        else:
+                            await self._search_conversation_in_existing_feige_page(conversation_page, order_id)
                         await self._ensure_page_ready(conversation_page)
                         eligibility = await self._check_eligibility(conversation_page, order_id)
                         if not eligibility.eligible:
