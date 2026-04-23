@@ -914,11 +914,35 @@ class BrowserWorker:
 
     async def _release_conversation(self, page: Page) -> None:
         """按 ESC 释放飞鸽会话归属，使后续客户消息派发给在线客服而非当前操作者。"""
+        input_box = self._feige_message_input_locator(page)
         for attempt in range(3):
             try:
                 await page.keyboard.press("Escape")
+                await page.wait_for_timeout(400)
                 await self._raise_if_risk_control_detected(page)
-                return
+                try:
+                    still_focused = await page.evaluate(
+                        "() => { const el = document.activeElement; return !!el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT'); }"
+                    )
+                except Exception:
+                    still_focused = False
+                try:
+                    input_visible = await input_box.count() > 0 and await input_box.first.is_visible()
+                except Exception:
+                    input_visible = False
+                if still_focused and input_visible:
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(400)
+                    await self._raise_if_risk_control_detected(page)
+                    try:
+                        still_focused = await page.evaluate(
+                            "() => { const el = document.activeElement; return !!el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT'); }"
+                        )
+                    except Exception:
+                        still_focused = False
+                self.logger.info("会话归属释放 | esc-ok | attempt=%s | still_focused=%s | input_visible=%s", attempt + 1, still_focused, input_visible)
+                if not still_focused:
+                    return
             except Exception as exc:
                 if "BROWSER_SESSION_BROKEN" in str(exc) or RISK_CONTROL_ERROR_TOKEN in str(exc):
                     raise
@@ -926,7 +950,7 @@ class BrowserWorker:
                     raise RuntimeError("BROWSER_SESSION_BROKEN") from exc
                 self.logger.warning("会话归属释放 | esc-retry %s/3 | %s", attempt + 1, exc)
                 await self._ensure_page_ready(page)
-        self.logger.warning("会话归属释放 | esc-incomplete | 3次重试均失败")
+        self.logger.warning("会话归属释放 | esc-incomplete | 3次重试后仍未确认退出会话焦点")
 
     async def process_order(self, order_id: str, message: str) -> tuple[str, str]:
         if self.context is None:
