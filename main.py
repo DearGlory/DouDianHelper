@@ -620,7 +620,13 @@ async def run(
 ) -> None:
     logger = setup_logger(config.get("log_level", "INFO"), config.get("log_file"))
     reader = ExcelOrderReader(config["excel_path"], config.get("order_id_aliases"))
+    logger.info("Excel路径: %s", reader.excel_path.resolve())
     all_order_ids = reader.read_order_ids()
+    if not all_order_ids:
+        raise RuntimeError(
+            f"Excel 中未读取到任何有效订单号: {reader.excel_path.resolve()}。"
+            "请检查是否覆盖到了正确的 Order.xlsx、表头是否为订单号/订单编号、以及文件是否已被清空。"
+        )
     selected_order_ids_for_run: list[str] = []
     prefer_fresh_run = limit is not None or parallel_workers is not None
     runtime_state = None if dry_run else load_runtime_state(config)
