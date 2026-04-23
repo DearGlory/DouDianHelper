@@ -14,6 +14,7 @@ CDP_CHECK_URL_TEMPLATE = "http://127.0.0.1:{port}/json/version"
 BROWSER_CANDIDATES = [
     ("Edge", Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")),
     ("Edge", Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe")),
+    ("Edge", Path(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe")),
     ("Edge Beta", Path(r"C:\Program Files (x86)\Microsoft\Edge Beta\Application\msedge.exe")),
     ("Edge Beta", Path(r"C:\Program Files\Microsoft\Edge Beta\Application\msedge.exe")),
     ("Edge Dev", Path(r"C:\Program Files (x86)\Microsoft\Edge Dev\Application\msedge.exe")),
@@ -36,9 +37,14 @@ def load_config(path: str) -> dict:
 def find_edge() -> Path:
     env_override = os.environ.get("EDGE_PATH") or os.environ.get("BROWSER_PATH")
     if env_override:
-        candidate = Path(os.path.expandvars(env_override)).expanduser()
+        cleaned = env_override.strip().strip('"').strip("'")
+        candidate = Path(os.path.expandvars(cleaned)).expanduser()
         if candidate.exists():
             return candidate
+
+    app_paths_browser = _probe_windows_app_paths()
+    if app_paths_browser and app_paths_browser.exists():
+        return app_paths_browser
 
     default_browser = _probe_windows_default_browser()
     if default_browser and default_browser.exists():
@@ -85,7 +91,30 @@ def find_edge() -> Path:
     )
 
 
-def _probe_windows_default_browser() -> Path | None:
+def _probe_windows_app_paths() -> Path | None:
+    command = (
+        r"$keys = @("
+        r"  'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',"
+        r"  'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',"
+        r"  'Registry::HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',"
+        r"  'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe',"
+        r"  'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe',"
+        r"  'Registry::HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe'"
+        r"); "
+        r"foreach ($k in $keys) { $v = (Get-ItemProperty $k -ErrorAction SilentlyContinue).'(default)'; if ($v -and (Test-Path $v)) { Write-Output $v; break } }"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+    )
+    detected = (result.stdout or "").strip()
+    return Path(detected) if detected else None
+
+
     command = (
         r"$progId = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -ErrorAction SilentlyContinue).ProgId; "
         r"if (-not $progId) { $progId = (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -ErrorAction SilentlyContinue).ProgId }; "
