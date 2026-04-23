@@ -87,13 +87,13 @@ def find_edge() -> Path:
 
 def _probe_windows_default_browser() -> Path | None:
     command = (
-        "$progId = (Get-ItemProperty 'HKCU:\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice' -ErrorAction SilentlyContinue).ProgId; "
-        "if (-not $progId) { $progId = (Get-ItemProperty 'HKLM:\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice' -ErrorAction SilentlyContinue).ProgId }; "
-        "if (-not $progId) { exit 0 }; "
-        "$cmd = (Get-ItemProperty (\"Registry::HKEY_CLASSES_ROOT\\$progId\\shell\\open\\command\") -ErrorAction SilentlyContinue).'(default)'; "
-        "if (-not $cmd) { exit 0 }; "
-        "$match = [regex]::Match($cmd, '^\"(?<exe>[^\"]+)\"|^(?<exe>[^ ]+\.exe)'); "
-        "if ($match.Success) { $exe = $match.Groups['exe'].Value; if ($exe -and (Test-Path $exe)) { Write-Output $exe } }"
+        r"$progId = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -ErrorAction SilentlyContinue).ProgId; "
+        r"if (-not $progId) { $progId = (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -ErrorAction SilentlyContinue).ProgId }; "
+        r"if (-not $progId) { exit 0 }; "
+        r"$cmd = (Get-ItemProperty (\"Registry::HKEY_CLASSES_ROOT\\$progId\\shell\\open\\command\") -ErrorAction SilentlyContinue).'(default)'; "
+        r"if (-not $cmd) { exit 0 }; "
+        r"$match = [regex]::Match($cmd, '^\"(?<exe>[^\"]+)\"|^(?<exe>[^ ]+\.exe)'); "
+        r"if ($match.Success) { $exe = $match.Groups['exe'].Value; if ($exe -and (Test-Path $exe)) { Write-Output $exe } }"
     )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", command],
@@ -107,6 +107,7 @@ def _probe_windows_default_browser() -> Path | None:
     return Path(detected) if detected else None
 
 
+def _default_edge_user_data_dir() -> Path:
     local_appdata = os.environ.get("LOCALAPPDATA")
     if not local_appdata:
         raise RuntimeError("无法获取 LOCALAPPDATA，无法自动定位 Edge 用户目录")
