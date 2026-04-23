@@ -103,7 +103,11 @@ class BrowserWorker:
                 return p
         page = await self.context.new_page()
         await page.goto(DOUDIAN_ORDER_LIST_URL, wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(self.config.get("default_wait_ms", 3000))
+        await self._wait_locator_visible(
+            page,
+            page.locator("input[placeholder='请输入'], input.auxo-input").first,
+            "订单管理页搜索框",
+        )
         return page
 
     async def start(self, num_workers: int = 1) -> None:
@@ -229,8 +233,39 @@ class BrowserWorker:
         page = self.context.pages[0] if self.context.pages else await self.context.new_page()
         self.logger.warning("导航 | feige | missing-page | goto")
         await self._goto_feige_workspace(page)
-        await page.wait_for_timeout(self.config.get("default_wait_ms", 3000))
+        await self._wait_locator_visible(
+            page,
+            page.locator(self._sel("feige_search_input")).first,
+            "飞鸽搜索框",
+        )
         return page
+
+    async def _wait_locator_visible(self, page: Page, locator, desc: str, attempts: int = 5, interval_ms: int = 1000) -> None:
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                if await locator.count() > 0 and await locator.first.is_visible():
+                    return
+            except Exception as exc:
+                last_error = exc
+            if attempt < attempts - 1:
+                await self._raise_if_risk_control_detected(page)
+                await page.wait_for_timeout(interval_ms)
+        raise RuntimeError(f"{desc} 未出现: {last_error}")
+
+    async def _wait_text_in_locator(self, page: Page, locator, needle: str, desc: str, attempts: int = 5, interval_ms: int = 1000) -> str:
+        for attempt in range(attempts):
+            try:
+                if await locator.count() > 0:
+                    text = (await locator.first.inner_text()).strip()
+                    if needle in text:
+                        return text
+            except Exception:
+                pass
+            if attempt < attempts - 1:
+                await self._raise_if_risk_control_detected(page)
+                await page.wait_for_timeout(interval_ms)
+        raise RuntimeError(f"{desc} 未出现: {needle}")
 
     async def _ensure_logged_in(self, page: Page) -> None:
         body_text = await page.locator("body").inner_text()
@@ -442,12 +477,12 @@ class BrowserWorker:
         await self._raise_if_risk_control_detected(page)
         self.logger.info("订单 %s：等待搜索结果", order_id)
         container = page.locator("table, div.index_orderList__axNH7, div.index_latestOrderList__wfoJq, .auxo-table-wrapper").first
-        await container.wait_for(state="visible", timeout=10_000)
-        return (await container.inner_text()).strip()
+        return await self._wait_text_in_locator(page, container, order_id, "订单管理页搜索结果")
 
     async def _get_doudian_order_snapshot(self, page: Page, order_id: str) -> dict[str, str]:
         await self._search_order_in_doudian(page, order_id)
-        await page.wait_for_timeout(200)
+        container = page.locator("table, div.index_orderList__axNH7, div.index_latestOrderList__wfoJq, .auxo-table-wrapper").first
+        await self._wait_text_in_locator(page, container, order_id, "订单管理页快照结果")
         snapshot = await page.evaluate(
             """
             (targetOrderId) => {
@@ -601,7 +636,11 @@ class BrowserWorker:
         page = await self.context.new_page()
         await page.set_viewport_size({"width": 1920, "height": 1080})
         await page.goto(FEIGE_URL, wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(self.config.get("default_wait_ms", 3000))
+        await self._wait_locator_visible(
+            page,
+            page.locator(self._sel("feige_search_input")).first,
+            "飞鸽搜索框",
+        )
         await self._ensure_logged_in(page)
         await self._raise_if_risk_control_detected(page)
 
@@ -736,10 +775,7 @@ class BrowserWorker:
         self.logger.info("发送：准备输入消息")
         sel_input = self._sel("feige_input")
         sel_send = self._sel("feige_send_button")
-        try:
-            await page.wait_for_selector(sel_input, state="visible", timeout=10_000)
-        except Exception as e:
-            raise RuntimeError("CHAT_INPUT_NOT_FOUND: 聊天输入框未出现，跳过该订单") from e
+        await self._wait_locator_visible(page, page.locator(sel_input).first, "聊天输入框")
         await self._ensure_page_ready(page)
         await page.fill(sel_input, text)
         try:
@@ -749,7 +785,7 @@ class BrowserWorker:
                 raise
             await self._ensure_page_ready(page)
             await page.click(sel_send)
-        await page.wait_for_timeout(self.config.get("post_send_wait_ms", 800))
+        await self._wait_text_in_locator(page, page.locator("body").first, text, "发送后消息回显")
         await self._raise_if_risk_control_detected(page)
 
     async def _release_conversation(self, page: Page) -> None:
