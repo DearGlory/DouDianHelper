@@ -27,6 +27,7 @@ BROWSER_CANDIDATES = [
 ]
 LAUNCH_LOG_DIR = Path("logs")
 LAUNCH_LOG_PATH = LAUNCH_LOG_DIR / "launch_edge.log"
+RESOLVED_BROWSER_PATH_FILE = LAUNCH_LOG_DIR / "resolved_browser_path.txt"
 
 
 def log_line(message: str) -> None:
@@ -106,7 +107,14 @@ def find_edge() -> Path:
     )
 
 
-def _probe_windows_app_paths() -> Path | None:
+def write_resolved_browser_path(path: Path) -> None:
+    try:
+        LAUNCH_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        RESOLVED_BROWSER_PATH_FILE.write_text(str(path), encoding="utf-8")
+    except Exception:
+        pass
+
+
     command = (
         r"$keys = @("
         r"  'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',"
@@ -328,6 +336,7 @@ def main() -> int:
     headless = bool(browser.get("headless", False))
 
     edge_path = find_edge()
+    write_resolved_browser_path(edge_path)
     user_data_dir.mkdir(parents=True, exist_ok=True)
 
     if headless:

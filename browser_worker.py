@@ -16,6 +16,7 @@ from playwright.async_api import Browser, BrowserContext, Error, Page, TimeoutEr
 FEIGE_URL = "https://im.jinritemai.com/pc_seller_v2/main/workspace"
 DOUDIAN_ORDER_LIST_URL = "https://fxg.jinritemai.com/ffa/morder/order/list"
 BOOTSTRAP_STORAGE_STATE = "storage_state.bootstrap.json"
+RESOLVED_BROWSER_PATH_FILE = Path("logs") / "resolved_browser_path.txt"
 CDP_STARTUP_LOCK = asyncio.Lock()
 CDP_NAVIGATION_RETRY_ERRORS = ("ERR_ABORTED", "ERR_CONNECTION_CLOSED", "ERR_NETWORK_CHANGED", "ERR_CONNECTION_RESET")
 RISK_CONTROL_ERROR_TOKEN = "RISK_CONTROL_DETECTED"
@@ -44,6 +45,14 @@ def resolve_launch_browser_executable(browser_cfg: dict) -> str | None:
     explicit = str(browser_cfg.get("executable_path", "")).strip().strip('"').strip("'")
     if explicit and Path(os.path.expandvars(explicit)).expanduser().exists():
         return str(Path(os.path.expandvars(explicit)).expanduser())
+
+    if RESOLVED_BROWSER_PATH_FILE.exists():
+        try:
+            recorded = RESOLVED_BROWSER_PATH_FILE.read_text(encoding="utf-8").strip().strip('"').strip("'")
+            if recorded and Path(recorded).exists():
+                return recorded
+        except Exception:
+            pass
 
     for env_name in ("EDGE_PATH", "BROWSER_PATH"):
         env_value = str(os.environ.get(env_name, "")).strip().strip('"').strip("'")
