@@ -290,6 +290,21 @@ class BrowserWorker:
     def _feige_send_button_locator(self, page: Page):
         return page.locator("#im-input-box").get_by_role("button", name="发送", exact=True).first
 
+    def _feige_chat_area_locator(self, page: Page):
+        return page.locator("#workspace-chat").first
+
+    async def _ensure_logged_in(self, page: Page) -> None:
+        body_text = await page.locator("body").inner_text()
+        if any(text in body_text for text in self.LOGIN_REQUIRED_TEXTS):
+            browser_cfg = self.config.get("browser", {})
+            user_data_dir = browser_cfg.get("user_data_dir", "edge-profile")
+            headless = browser_cfg.get("headless", False)
+            raise RuntimeError(
+                f"{LOGIN_STATE_MISSING_ERROR_TOKEN}: 飞鸽页面当前没有可用登录态。"
+                f"请先使用同一个 user_data_dir 登录一次: {user_data_dir}。"
+                f"当前 headless={headless}，程序将尝试回退到有头登录预热；如仍失败，再手动运行 start_edge.bat 登录飞鸽。"
+            )
+
     async def _focus_feige_search_input(self, page: Page):
         search_input = self._feige_search_input_locator(page)
         await self._wait_locator_visible(page, search_input, "飞鸽搜索框")
@@ -335,16 +350,6 @@ class BrowserWorker:
             await page.wait_for_timeout(150)
         return dismissed
 
-        body_text = await page.locator("body").inner_text()
-        if any(text in body_text for text in self.LOGIN_REQUIRED_TEXTS):
-            browser_cfg = self.config.get("browser", {})
-            user_data_dir = browser_cfg.get("user_data_dir", "edge-profile")
-            headless = browser_cfg.get("headless", False)
-            raise RuntimeError(
-                f"{LOGIN_STATE_MISSING_ERROR_TOKEN}: 飞鸽页面当前没有可用登录态。"
-                f"请先使用同一个 user_data_dir 登录一次: {user_data_dir}。"
-                f"当前 headless={headless}，程序将尝试回退到有头登录预热；如仍失败，再手动运行 start_edge.bat 登录飞鸽。"
-            )
 
     async def _dismiss_blocking_modal(self, page: Page) -> bool:
         modals = page.locator("div[role='dialog'].auxo-modal-wrap")
