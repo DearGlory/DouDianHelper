@@ -40,6 +40,10 @@ def find_edge() -> Path:
         if candidate.exists():
             return candidate
 
+    default_browser = _probe_windows_default_browser()
+    if default_browser and default_browser.exists():
+        return default_browser
+
     for exe_name in ("msedge.exe", "msedge", "chrome.exe", "chrome"):
         which_path = shutil.which(exe_name)
         if which_path:
@@ -81,7 +85,28 @@ def find_edge() -> Path:
     )
 
 
-def _default_edge_user_data_dir() -> Path:
+def _probe_windows_default_browser() -> Path | None:
+    command = (
+        "$progId = (Get-ItemProperty 'HKCU:\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice' -ErrorAction SilentlyContinue).ProgId; "
+        "if (-not $progId) { $progId = (Get-ItemProperty 'HKLM:\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice' -ErrorAction SilentlyContinue).ProgId }; "
+        "if (-not $progId) { exit 0 }; "
+        "$cmd = (Get-ItemProperty (\"Registry::HKEY_CLASSES_ROOT\\$progId\\shell\\open\\command\") -ErrorAction SilentlyContinue).'(default)'; "
+        "if (-not $cmd) { exit 0 }; "
+        "$match = [regex]::Match($cmd, '^\"(?<exe>[^\"]+)\"|^(?<exe>[^ ]+\.exe)'); "
+        "if ($match.Success) { $exe = $match.Groups['exe'].Value; if ($exe -and (Test-Path $exe)) { Write-Output $exe } }"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+    )
+    detected = (result.stdout or "").strip()
+    return Path(detected) if detected else None
+
+
     local_appdata = os.environ.get("LOCALAPPDATA")
     if not local_appdata:
         raise RuntimeError("无法获取 LOCALAPPDATA，无法自动定位 Edge 用户目录")
