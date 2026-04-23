@@ -288,7 +288,8 @@ class BrowserWorker:
         return page.locator("#im-input-box textarea[data-qa-id='qa-send-message-textarea'], textarea[data-qa-id='qa-send-message-textarea'], textarea.Q0ZcClfcpfuWyhFPU3gR").first
 
     def _feige_send_button_locator(self, page: Page):
-        return page.locator("#im-input-box").get_by_role("button", name="发送", exact=True).first
+        input_box = page.locator("#im-input-box").first
+        return input_box.get_by_role("button", name=re.compile(r"发\s*送")).first
 
     def _feige_chat_area_locator(self, page: Page):
         return page.locator("#workspace-chat").first
