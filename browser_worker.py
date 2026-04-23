@@ -253,6 +253,20 @@ class BrowserWorker:
                 await page.wait_for_timeout(interval_ms)
         raise RuntimeError(f"{desc} 未出现: {last_error}")
 
+    async def _wait_locator_hidden(self, page: Page, locator, desc: str, attempts: int = 5, interval_ms: int = 200) -> None:
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                if await locator.count() == 0 or not await locator.first.is_visible():
+                    return
+            except Exception as exc:
+                last_error = exc
+                return
+            if attempt < attempts - 1:
+                await self._raise_if_risk_control_detected(page)
+                await page.wait_for_timeout(interval_ms)
+        raise RuntimeError(f"{desc} 未消失: {last_error}")
+
     async def _wait_text_in_locator(self, page: Page, locator, needle: str, desc: str, attempts: int = 5, interval_ms: int = 1000) -> str:
         for attempt in range(attempts):
             try:
@@ -326,7 +340,7 @@ class BrowserWorker:
                     if await button.count() == 0:
                         continue
                     await button.click(timeout=2_000)
-                    await page.wait_for_timeout(300)
+                    await self._wait_locator_hidden(page, modal, "阻塞弹窗")
                     if not await modal.is_visible():
                         return True
                 except Exception:
@@ -338,7 +352,7 @@ class BrowserWorker:
                     if await button.count() == 0:
                         continue
                     await button.click(timeout=2_000)
-                    await page.wait_for_timeout(300)
+                    await self._wait_locator_hidden(page, modal, "阻塞弹窗")
                     if not await modal.is_visible():
                         return True
                 except Exception:
@@ -346,7 +360,7 @@ class BrowserWorker:
 
         try:
             await page.keyboard.press("Escape")
-            await page.wait_for_timeout(300)
+            await self._wait_locator_hidden(page, modals, "阻塞弹窗")
         except Exception:
             pass
 
@@ -398,7 +412,6 @@ class BrowserWorker:
             if not dismissed:
                 await self._raise_if_risk_control_detected(page)
                 return
-            await page.wait_for_timeout(300)
         await self._raise_if_risk_control_detected(page)
 
     async def _resolve_review_icon_button(self, card_root, card_header):
@@ -440,7 +453,6 @@ class BrowserWorker:
     async def _search_order_in_doudian(self, page: Page, order_id: str) -> str:
         self.logger.info("订单 %s：复用抖店订单页", order_id)
         await page.bring_to_front()
-        await page.wait_for_timeout(300)
         await self._raise_if_risk_control_detected(page)
 
         input_candidates = [
@@ -776,7 +788,7 @@ class BrowserWorker:
         chat_area = self._feige_chat_area_locator(page)
         await self._wait_locator_visible(page, input_locator, "聊天输入框")
         await self._ensure_page_ready(page)
-        message_echo = chat_area.get_by_text(text, exact=False)
+        message_echo = chat_area.locator("[data-qa-id='qa-message-warpper'] .messageIsMe span").filter(has_text=text)
         before_count = 0
         try:
             before_count = await message_echo.count()
@@ -802,7 +814,7 @@ class BrowserWorker:
             if attempt < 4:
                 await self._raise_if_risk_control_detected(page)
                 await page.wait_for_timeout(1000)
-        await self._wait_text_in_locator(page, chat_area, text, "发送后消息回显")
+        await self._wait_text_in_locator(page, chat_area.locator("[data-qa-id='qa-message-warpper'] .messageIsMe").last, text, "发送后最新消息气泡")
         await self._raise_if_risk_control_detected(page)
 
     async def _release_conversation(self, page: Page) -> None:
@@ -810,7 +822,6 @@ class BrowserWorker:
         for attempt in range(3):
             try:
                 await page.keyboard.press("Escape")
-                await page.wait_for_timeout(500)
                 await self._raise_if_risk_control_detected(page)
                 return
             except Exception as exc:
@@ -819,7 +830,7 @@ class BrowserWorker:
                 if "Target page, context or browser has been closed" in str(exc):
                     raise RuntimeError("BROWSER_SESSION_BROKEN") from exc
                 self.logger.warning("会话归属释放 | esc-retry %s/3 | %s", attempt + 1, exc)
-                await page.wait_for_timeout(300)
+                await self._ensure_page_ready(page)
         self.logger.warning("会话归属释放 | esc-incomplete | 3次重试均失败")
 
     async def process_order(self, order_id: str, message: str) -> tuple[str, str]:
