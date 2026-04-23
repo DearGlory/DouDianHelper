@@ -235,7 +235,7 @@ class BrowserWorker:
         await self._goto_feige_workspace(page)
         await self._wait_locator_visible(
             page,
-            page.locator(self._sel("feige_search_input")).first,
+            self._feige_search_input_locator(page),
             "飞鸽搜索框",
         )
         return page
@@ -266,6 +266,18 @@ class BrowserWorker:
                 await self._raise_if_risk_control_detected(page)
                 await page.wait_for_timeout(interval_ms)
         raise RuntimeError(f"{desc} 未出现: {needle}")
+
+    def _feige_search_input_locator(self, page: Page):
+        return page.locator("input[data-qa-id='qa-user-order-search'], input.auxo-input").first
+
+    def _feige_message_input_locator(self, page: Page):
+        return page.locator("#im-input-box textarea[data-qa-id='qa-send-message-textarea'], textarea[data-qa-id='qa-send-message-textarea'], textarea.Q0ZcClfcpfuWyhFPU3gR").first
+
+    def _feige_send_button_locator(self, page: Page):
+        return page.locator("#im-input-box").get_by_role("button", name="发送", exact=True).first
+
+    def _feige_chat_area_locator(self, page: Page):
+        return page.locator("#workspace-chat").first
 
     async def _ensure_logged_in(self, page: Page) -> None:
         body_text = await page.locator("body").inner_text()
@@ -631,7 +643,7 @@ class BrowserWorker:
 
     async def _search_conversation_in_existing_feige_page(self, page: Page, order_id: str) -> Page:
         sel_search = self._sel("feige_search_input")
-        search_input = page.locator(sel_search).first
+        search_input = self._feige_search_input_locator(page)
         await self._wait_locator_visible(page, search_input, "飞鸽搜索框")
         await search_input.click()
         await self._raise_if_risk_control_detected(page)
@@ -676,7 +688,7 @@ class BrowserWorker:
         await page.goto(FEIGE_URL, wait_until="domcontentloaded", timeout=30_000)
         await self._wait_locator_visible(
             page,
-            page.locator(self._sel("feige_search_input")).first,
+            self._feige_search_input_locator(page),
             "飞鸽搜索框",
         )
         await self._ensure_logged_in(page)
@@ -759,22 +771,25 @@ class BrowserWorker:
         self.logger.info("发送：准备输入消息")
         sel_input = self._sel("feige_input")
         sel_send = self._sel("feige_send_button")
-        await self._wait_locator_visible(page, page.locator(sel_input).first, "聊天输入框")
+        input_locator = self._feige_message_input_locator(page)
+        send_button = self._feige_send_button_locator(page)
+        chat_area = self._feige_chat_area_locator(page)
+        await self._wait_locator_visible(page, input_locator, "聊天输入框")
         await self._ensure_page_ready(page)
-        message_echo = page.get_by_text(text, exact=False)
+        message_echo = chat_area.get_by_text(text, exact=False)
         before_count = 0
         try:
             before_count = await message_echo.count()
         except Exception:
             before_count = 0
-        await page.fill(sel_input, text)
+        await input_locator.fill(text)
         try:
-            await page.click(sel_send)
+            await send_button.click()
         except TimeoutError as exc:
             if "intercepts pointer events" not in str(exc):
                 raise
             await self._ensure_page_ready(page)
-            await page.click(sel_send)
+            await send_button.click()
         for attempt in range(5):
             try:
                 after_count = await message_echo.count()
@@ -787,7 +802,7 @@ class BrowserWorker:
             if attempt < 4:
                 await self._raise_if_risk_control_detected(page)
                 await page.wait_for_timeout(1000)
-        await self._wait_text_in_locator(page, page.locator("body").first, text, "发送后消息回显")
+        await self._wait_text_in_locator(page, chat_area, text, "发送后消息回显")
         await self._raise_if_risk_control_detected(page)
 
     async def _release_conversation(self, page: Page) -> None:
