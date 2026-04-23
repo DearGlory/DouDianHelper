@@ -115,6 +115,7 @@ def write_resolved_browser_path(path: Path) -> None:
         pass
 
 
+def _probe_windows_app_paths() -> Path | None:
     command = (
         r"$keys = @("
         r"  'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',"
@@ -138,6 +139,7 @@ def write_resolved_browser_path(path: Path) -> None:
     return Path(detected) if detected else None
 
 
+def _probe_windows_default_browser() -> Path | None:
     command = (
         r"$progId = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -ErrorAction SilentlyContinue).ProgId; "
         r"if (-not $progId) { $progId = (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -ErrorAction SilentlyContinue).ProgId }; "
