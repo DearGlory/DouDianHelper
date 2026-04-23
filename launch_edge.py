@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -10,9 +11,16 @@ from urllib.request import urlopen
 
 FEIGE_URL = "https://im.jinritemai.com/pc_seller_v2/main/workspace"
 CDP_CHECK_URL_TEMPLATE = "http://127.0.0.1:{port}/json/version"
-EDGE_CANDIDATES = [
-    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
-    Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+BROWSER_CANDIDATES = [
+    ("Edge", Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")),
+    ("Edge", Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe")),
+    ("Edge Beta", Path(r"C:\Program Files (x86)\Microsoft\Edge Beta\Application\msedge.exe")),
+    ("Edge Beta", Path(r"C:\Program Files\Microsoft\Edge Beta\Application\msedge.exe")),
+    ("Edge Dev", Path(r"C:\Program Files (x86)\Microsoft\Edge Dev\Application\msedge.exe")),
+    ("Edge Dev", Path(r"C:\Program Files\Microsoft\Edge Dev\Application\msedge.exe")),
+    ("Edge Canary", Path(r"C:\Users\%USERNAME%\AppData\Local\Microsoft\Edge SxS\Application\msedge.exe")),
+    ("Chrome", Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")),
+    ("Chrome", Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe")),
 ]
 
 
@@ -26,10 +34,51 @@ def load_config(path: str) -> dict:
 
 
 def find_edge() -> Path:
-    for candidate in EDGE_CANDIDATES:
+    env_override = os.environ.get("EDGE_PATH") or os.environ.get("BROWSER_PATH")
+    if env_override:
+        candidate = Path(os.path.expandvars(env_override)).expanduser()
         if candidate.exists():
             return candidate
-    raise FileNotFoundError("Edge not found")
+
+    for exe_name in ("msedge.exe", "msedge", "chrome.exe", "chrome"):
+        which_path = shutil.which(exe_name)
+        if which_path:
+            return Path(which_path)
+
+    for _label, raw_candidate in BROWSER_CANDIDATES:
+        candidate = Path(os.path.expandvars(str(raw_candidate))).expanduser()
+        if candidate.exists():
+            return candidate
+
+    powershell_probe = (
+        "$paths = @(); "
+        "$cmds = @(Get-Command msedge, chrome -ErrorAction SilentlyContinue | Where-Object { $_ }); "
+        "foreach ($c in $cmds) { if ($c.Source) { $paths += $c.Source } } ; "
+        "$paths += @(" 
+        "  \"$Env:ProgramFiles\\Microsoft\\Edge\\Application\\msedge.exe\","
+        "  \"$Env:ProgramFiles(x86)\\Microsoft\\Edge\\Application\\msedge.exe\","
+        "  \"$Env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe\","
+        "  \"$Env:ProgramFiles(x86)\\Google\\Chrome\\Application\\chrome.exe\","
+        "  \"$Env:LOCALAPPDATA\\Microsoft\\Edge SxS\\Application\\msedge.exe\""
+        "); "
+        "$hit = $paths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1; "
+        "if ($hit) { Write-Output $hit }"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", powershell_probe],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+    )
+    detected = (result.stdout or "").strip()
+    if detected:
+        return Path(detected)
+
+    raise FileNotFoundError(
+        "未找到可用浏览器（Edge/Chrome）。请安装 Microsoft Edge，或设置 EDGE_PATH/BROWSER_PATH 指向 msedge.exe 或 chrome.exe。"
+    )
 
 
 def _default_edge_user_data_dir() -> Path:
