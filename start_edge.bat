@@ -5,6 +5,11 @@ cd /d "%~dp0"
 
 set "LIMIT_ARG="
 set "PARALLEL_ARG="
+set "LOG_DIR=%cd%\log"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "RUN_TS=%%I"
+set "LAUNCH_LOG=%LOG_DIR%\launch_edge-%RUN_TS%.log"
+set "MAIN_LOG=%LOG_DIR%\main-%RUN_TS%.log"
 
 echo ============================================
 echo   Starting Edge with CDP (port 9222)
@@ -58,7 +63,7 @@ pause
 exit /b 1
 
 :launch_edge
-"venv\Scripts\python.exe" launch_edge.py
+powershell -NoProfile -Command "$ErrorActionPreference='Continue'; & 'venv\Scripts\python.exe' 'launch_edge.py' 2>&1 | Tee-Object -FilePath '%LAUNCH_LOG%'"
 if errorlevel 1 goto cdp_failed
 goto run_main
 
@@ -73,7 +78,9 @@ echo ============================================
 echo   Running DouDianHelper ...
 echo ============================================
 echo Type q / quit / exit then press Enter to stop gracefully.
-"venv\Scripts\python.exe" main.py %PARALLEL_ARG% %LIMIT_ARG%
+powershell -NoProfile -Command "$ErrorActionPreference='Continue'; & 'venv\Scripts\python.exe' 'main.py' %PARALLEL_ARG% %LIMIT_ARG% 2>&1 | Tee-Object -FilePath '%MAIN_LOG%'"
 
 echo.
+echo [INFO] launch log: %LAUNCH_LOG%
+echo [INFO] main log: %MAIN_LOG%
 pause
